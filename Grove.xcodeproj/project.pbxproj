@@ -1,0 +1,451 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000010000000000000001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000001 /* main.swift */; };
+		A10000010000000000000002 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000002 /* AppDelegate.swift */; };
+		A10000010000000000000003 /* BrowserWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000003 /* BrowserWindowController.swift */; };
+		A10000010000000000000004 /* MainSplitViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000004 /* MainSplitViewController.swift */; };
+		A10000010000000000000005 /* SidebarViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000005 /* SidebarViewController.swift */; };
+		A10000010000000000000006 /* FileListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000006 /* FileListViewController.swift */; };
+		A10000010000000000000007 /* InspectorViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000007 /* InspectorViewController.swift */; };
+		A10000010000000000000008 /* FileItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000008 /* FileItem.swift */; };
+		A10000010000000000000009 /* SidebarItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000009 /* SidebarItem.swift */; };
+		A1000001000000000000000A /* NavigationHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001000000000000000A /* NavigationHistory.swift */; };
+		A1000001000000000000000B /* FileOperationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001000000000000000B /* FileOperationService.swift */; };
+		A1000001000000000000000C /* DirectoryWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001000000000000000C /* DirectoryWatcher.swift */; };
+		A1000001000000000000000D /* ThumbnailCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001000000000000000D /* ThumbnailCache.swift */; };
+		A1000001000000000000000E /* InspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001000000000000000E /* InspectorView.swift */; };
+		A1000001000000000000000F /* PathBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001000000000000000F /* PathBarView.swift */; };
+		A10000010000000000000010 /* URL+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000010 /* URL+Extensions.swift */; };
+		A10000010000000000000011 /* NSImage+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000011 /* NSImage+Extensions.swift */; };
+		A10000010000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000012 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		B10000010000000000000001 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		B10000010000000000000002 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		B10000010000000000000003 /* BrowserWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserWindowController.swift; sourceTree = "<group>"; };
+		B10000010000000000000004 /* MainSplitViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainSplitViewController.swift; sourceTree = "<group>"; };
+		B10000010000000000000005 /* SidebarViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarViewController.swift; sourceTree = "<group>"; };
+		B10000010000000000000006 /* FileListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileListViewController.swift; sourceTree = "<group>"; };
+		B10000010000000000000007 /* InspectorViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorViewController.swift; sourceTree = "<group>"; };
+		B10000010000000000000008 /* FileItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileItem.swift; sourceTree = "<group>"; };
+		B10000010000000000000009 /* SidebarItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarItem.swift; sourceTree = "<group>"; };
+		B1000001000000000000000A /* NavigationHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationHistory.swift; sourceTree = "<group>"; };
+		B1000001000000000000000B /* FileOperationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileOperationService.swift; sourceTree = "<group>"; };
+		B1000001000000000000000C /* DirectoryWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectoryWatcher.swift; sourceTree = "<group>"; };
+		B1000001000000000000000D /* ThumbnailCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThumbnailCache.swift; sourceTree = "<group>"; };
+		B1000001000000000000000E /* InspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorView.swift; sourceTree = "<group>"; };
+		B1000001000000000000000F /* PathBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathBarView.swift; sourceTree = "<group>"; };
+		B10000010000000000000010 /* URL+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "URL+Extensions.swift"; sourceTree = "<group>"; };
+		B10000010000000000000011 /* NSImage+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSImage+Extensions.swift"; sourceTree = "<group>"; };
+		B10000010000000000000012 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B10000010000000000000013 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B10000010000000000000014 /* Grove.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Grove.entitlements; sourceTree = "<group>"; };
+		C10000010000000000000001 /* Grove.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Grove.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		D10000010000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		E10000010000000000000001 /* Root */ = {
+			isa = PBXGroup;
+			children = (
+				E10000010000000000000002 /* Grove */,
+				E10000010000000000000009 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		E10000010000000000000002 /* Grove */ = {
+			isa = PBXGroup;
+			children = (
+				E10000010000000000000003 /* App */,
+				E10000010000000000000004 /* Controllers */,
+				E10000010000000000000005 /* Models */,
+				E10000010000000000000006 /* Services */,
+				E10000010000000000000007 /* Views */,
+				E10000010000000000000008 /* Extensions */,
+				E1000001000000000000000A /* Resources */,
+			);
+			path = Grove;
+			sourceTree = "<group>";
+		};
+		E10000010000000000000003 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000001 /* main.swift */,
+				B10000010000000000000002 /* AppDelegate.swift */,
+				B10000010000000000000013 /* Info.plist */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		E10000010000000000000004 /* Controllers */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000003 /* BrowserWindowController.swift */,
+				B10000010000000000000004 /* MainSplitViewController.swift */,
+				B10000010000000000000005 /* SidebarViewController.swift */,
+				B10000010000000000000006 /* FileListViewController.swift */,
+				B10000010000000000000007 /* InspectorViewController.swift */,
+			);
+			path = Controllers;
+			sourceTree = "<group>";
+		};
+		E10000010000000000000005 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000008 /* FileItem.swift */,
+				B10000010000000000000009 /* SidebarItem.swift */,
+				B1000001000000000000000A /* NavigationHistory.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		E10000010000000000000006 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				B1000001000000000000000B /* FileOperationService.swift */,
+				B1000001000000000000000C /* DirectoryWatcher.swift */,
+				B1000001000000000000000D /* ThumbnailCache.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		E10000010000000000000007 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				B1000001000000000000000E /* InspectorView.swift */,
+				B1000001000000000000000F /* PathBarView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		E10000010000000000000008 /* Extensions */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000010 /* URL+Extensions.swift */,
+				B10000010000000000000011 /* NSImage+Extensions.swift */,
+			);
+			path = Extensions;
+			sourceTree = "<group>";
+		};
+		E10000010000000000000009 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C10000010000000000000001 /* Grove.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		E1000001000000000000000A /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				B10000010000000000000012 /* Assets.xcassets */,
+				B10000010000000000000014 /* Grove.entitlements */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		F10000010000000000000001 /* Grove */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F10000010000000000000004 /* Build configuration list for PBXNativeTarget "Grove" */;
+			buildPhases = (
+				F10000010000000000000002 /* Sources */,
+				D10000010000000000000001 /* Frameworks */,
+				F10000010000000000000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Grove;
+			productName = Grove;
+			productReference = C10000010000000000000001 /* Grove.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		F10000010000000000000005 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					F10000010000000000000001 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = F10000010000000000000006 /* Build configuration list for PBXProject "Grove" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = E10000010000000000000001 /* Root */;
+			productRefGroup = E10000010000000000000009 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F10000010000000000000001 /* Grove */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		F10000010000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000010000000000000012 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		F10000010000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000010000000000000001 /* main.swift in Sources */,
+				A10000010000000000000002 /* AppDelegate.swift in Sources */,
+				A10000010000000000000003 /* BrowserWindowController.swift in Sources */,
+				A10000010000000000000004 /* MainSplitViewController.swift in Sources */,
+				A10000010000000000000005 /* SidebarViewController.swift in Sources */,
+				A10000010000000000000006 /* FileListViewController.swift in Sources */,
+				A10000010000000000000007 /* InspectorViewController.swift in Sources */,
+				A10000010000000000000008 /* FileItem.swift in Sources */,
+				A10000010000000000000009 /* SidebarItem.swift in Sources */,
+				A1000001000000000000000A /* NavigationHistory.swift in Sources */,
+				A1000001000000000000000B /* FileOperationService.swift in Sources */,
+				A1000001000000000000000C /* DirectoryWatcher.swift in Sources */,
+				A1000001000000000000000D /* ThumbnailCache.swift in Sources */,
+				A1000001000000000000000E /* InspectorView.swift in Sources */,
+				A1000001000000000000000F /* PathBarView.swift in Sources */,
+				A10000010000000000000010 /* URL+Extensions.swift in Sources */,
+				A10000010000000000000011 /* NSImage+Extensions.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		G10000010000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		G10000010000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		G10000010000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Grove/Resources/Grove.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Grove/App/Info.plist;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMainNibFile = "";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.goosefraba.grove;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		G10000010000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Grove/Resources/Grove.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Grove/App/Info.plist;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMainNibFile = "";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.goosefraba.grove;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		F10000010000000000000006 /* Build configuration list for PBXProject "Grove" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				G10000010000000000000001 /* Debug */,
+				G10000010000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F10000010000000000000004 /* Build configuration list for PBXNativeTarget "Grove" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				G10000010000000000000003 /* Debug */,
+				G10000010000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = F10000010000000000000005 /* Project object */;
+}
