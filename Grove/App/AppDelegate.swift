@@ -14,9 +14,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        let wc = BrowserWindowController()
-        wc.showWindow(nil)
-        windowControllers.append(wc)
+        // Restore previous window states or open default
+        if restoreWindowStates() {
+            // Windows restored successfully
+        } else {
+            let wc = BrowserWindowController()
+            wc.showWindow(nil)
+            windowControllers.append(wc)
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ application: NSApplication) -> Bool {
@@ -28,6 +33,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             newWindow(nil)
         }
         return true
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        saveWindowStates()
     }
 
     // MARK: - Window Management
@@ -59,6 +68,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowControllers.removeAll { $0.window === window }
     }
 
+    // MARK: - Window State Save/Restore
+
+    private func saveWindowStates() {
+        let states = windowControllers.map { $0.saveState() }
+        UserDefaults.standard.set(states, forKey: BrowserWindowController.windowStatesKey)
+    }
+
+    private func restoreWindowStates() -> Bool {
+        guard let states = UserDefaults.standard.array(forKey: BrowserWindowController.windowStatesKey) as? [[String: Any]],
+              !states.isEmpty else {
+            return false
+        }
+
+        var restored = false
+        for state in states {
+            if let wc = BrowserWindowController.restoreState(from: state) {
+                wc.showWindow(nil)
+                windowControllers.append(wc)
+                restored = true
+            }
+        }
+        return restored
+    }
+
     // MARK: - Menu Actions
 
     @objc func goBack(_ sender: Any?) {
@@ -77,6 +110,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bc.navigate(to: parent, addToHistory: true)
     }
 
+    @objc func goToFolder(_ sender: Any?) {
+        currentBrowserController?.goToFolder(sender)
+    }
+
     @objc func copyFiles(_ sender: Any?) {
         currentFileListVC?.copySelectedFiles()
     }
@@ -93,6 +130,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         currentFileListVC?.deleteSelectedFiles()
     }
 
+    @objc func duplicateFiles(_ sender: Any?) {
+        currentFileListVC?.duplicateSelectedFiles()
+    }
+
+    @objc func batchRenameFiles(_ sender: Any?) {
+        currentFileListVC?.batchRenameSelectedFiles()
+    }
+
     @objc func createNewFolder(_ sender: Any?) {
         currentFileListVC?.createNewFolder()
     }
@@ -102,21 +147,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func toggleHiddenFiles(_ sender: Any?) {
-        currentFileListVC?.toggleHiddenFiles()
+        currentSplitVC?.toggleHiddenFiles()
     }
 
     @objc func toggleInspector(_ sender: Any?) {
         currentBrowserController?.toggleInspector(sender)
     }
 
+    // MARK: - View Mode Actions
+
+    @objc func viewAsList(_ sender: Any?) {
+        currentSplitVC?.switchViewMode(.list)
+    }
+
+    @objc func viewAsColumns(_ sender: Any?) {
+        currentSplitVC?.switchViewMode(.columns)
+    }
+
+    @objc func viewAsIcons(_ sender: Any?) {
+        currentSplitVC?.switchViewMode(.icons)
+    }
+
+    @objc func viewAsGallery(_ sender: Any?) {
+        currentSplitVC?.switchViewMode(.gallery)
+    }
+
+    @objc func togglePreviewPane(_ sender: Any?) {
+        currentSplitVC?.togglePreviewPane()
+    }
+
+    @objc func toggleDualPane(_ sender: Any?) {
+        currentSplitVC?.toggleDualPane()
+    }
+
     private var currentBrowserController: BrowserWindowController? {
         NSApp.keyWindow?.windowController as? BrowserWindowController
     }
 
+    private var currentSplitVC: MainSplitViewController? {
+        guard let wc = currentBrowserController else { return nil }
+        return wc.contentViewController as? MainSplitViewController
+    }
+
     private var currentFileListVC: FileListViewController? {
-        guard let wc = currentBrowserController,
-              let splitVC = wc.contentViewController as? MainSplitViewController else { return nil }
-        return splitVC.fileListVC
+        currentSplitVC?.fileListVC
     }
 
     // MARK: - Main Menu
@@ -149,6 +223,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fileMenu.addItem(.separator())
         fileMenu.addItem(withTitle: "Open", action: #selector(openFile(_:)), keyEquivalent: "o")
         fileMenu.addItem(.separator())
+        fileMenu.addItem(withTitle: "Duplicate", action: #selector(duplicateFiles(_:)), keyEquivalent: "d")
+        let batchRenameItem = fileMenu.addItem(withTitle: "Batch Rename...", action: #selector(batchRenameFiles(_:)), keyEquivalent: "R")
+        batchRenameItem.keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(.separator())
         let closeItem = fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         closeItem.keyEquivalentModifierMask = .command
         fileMenuItem.submenu = fileMenu
@@ -174,11 +252,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // View menu
         let viewMenuItem = NSMenuItem()
         let viewMenu = NSMenu(title: "View")
+
+        viewMenu.addItem(withTitle: "as List", action: #selector(viewAsList(_:)), keyEquivalent: "1")
+        viewMenu.addItem(withTitle: "as Columns", action: #selector(viewAsColumns(_:)), keyEquivalent: "2")
+        viewMenu.addItem(withTitle: "as Icons", action: #selector(viewAsIcons(_:)), keyEquivalent: "3")
+        viewMenu.addItem(withTitle: "as Gallery", action: #selector(viewAsGallery(_:)), keyEquivalent: "4")
+        viewMenu.addItem(.separator())
+
         let hiddenItem = viewMenu.addItem(withTitle: "Show Hidden Files", action: #selector(toggleHiddenFiles(_:)), keyEquivalent: ".")
         hiddenItem.keyEquivalentModifierMask = [.command, .shift]
         viewMenu.addItem(.separator())
+
         let inspectorItem = viewMenu.addItem(withTitle: "Toggle Inspector", action: #selector(toggleInspector(_:)), keyEquivalent: "i")
         inspectorItem.keyEquivalentModifierMask = [.command, .option]
+
+        let previewItem = viewMenu.addItem(withTitle: "Show Preview Pane", action: #selector(togglePreviewPane(_:)), keyEquivalent: "p")
+        previewItem.keyEquivalentModifierMask = [.command, .shift]
+
+        viewMenu.addItem(.separator())
+
+        let dualPaneItem = viewMenu.addItem(withTitle: "Dual Pane", action: #selector(toggleDualPane(_:)), keyEquivalent: "d")
+        dualPaneItem.keyEquivalentModifierMask = [.command, .option]
+
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
 
@@ -192,6 +287,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let enclosingItem = NSMenuItem(title: "Enclosing Folder", action: #selector(goEnclosingFolder(_:)), keyEquivalent: String(Character(UnicodeScalar(NSUpArrowFunctionKey)!)))
         enclosingItem.keyEquivalentModifierMask = .command
         goMenu.addItem(enclosingItem)
+        goMenu.addItem(.separator())
+        let goToFolderItem = goMenu.addItem(withTitle: "Go to Folder...", action: #selector(goToFolder(_:)), keyEquivalent: "g")
+        goToFolderItem.keyEquivalentModifierMask = [.command, .shift]
         goMenuItem.submenu = goMenu
         mainMenu.addItem(goMenuItem)
 

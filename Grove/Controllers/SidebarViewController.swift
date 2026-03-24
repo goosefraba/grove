@@ -14,6 +14,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private let sections = SidebarSection.allCases
     private var items: [SidebarSection: [SidebarItem]] = [:]
 
+    private static let sidebarItemPasteboardType = NSPasteboard.PasteboardType("com.grove.sidebaritem")
+
     override func loadView() {
         view = NSView()
         view.setFrameSize(NSSize(width: 200, height: 400))
@@ -23,12 +25,20 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         super.viewDidLoad()
         reloadItems()
         setupOutlineView()
+        setupAccessibility()
 
         let ws = NSWorkspace.shared.notificationCenter
         ws.addObserver(self, selector: #selector(volumesChanged(_:)),
                        name: NSWorkspace.didMountNotification, object: nil)
         ws.addObserver(self, selector: #selector(volumesChanged(_:)),
                        name: NSWorkspace.didUnmountNotification, object: nil)
+    }
+
+    private func setupAccessibility() {
+        outlineView.setAccessibilityRole(.outline)
+        outlineView.setAccessibilityLabel("Sidebar")
+        outlineView.setAccessibilityIdentifier("sidebarOutlineView")
+        scrollView.setAccessibilityIdentifier("sidebarScrollView")
     }
 
     @objc private func volumesChanged(_ notification: Notification) {
@@ -56,6 +66,13 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         outlineView.selectionHighlightStyle = .sourceList
         outlineView.style = .sourceList
         outlineView.floatsGroupRows = false
+
+        outlineView.registerForDraggedTypes([.fileURL, Self.sidebarItemPasteboardType])
+        outlineView.setDraggingSourceOperationMask(.move, forLocal: true)
+
+        let menu = NSMenu()
+        menu.delegate = self
+        outlineView.menu = menu
 
         scrollView.documentView = outlineView
         scrollView.hasVerticalScroller = true
@@ -102,6 +119,147 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         item is SidebarSection
     }
 
+    // MARK: - Drag Source (for reordering)
+
+    func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> (any NSPasteboardWriting)? {
+        guard let sidebarItem = item as? SidebarItem,
+              sidebarItem.section == .favorites else { return nil }
+
+        let pbItem = NSPasteboardItem()
+        pbItem.setString(sidebarItem.url.path, forType: Self.sidebarItemPasteboardType)
+        return pbItem
+    }
+
+    // MARK: - Drop Target
+
+    func outlineView(_ outlineView: NSOutlineView, validateDrop info: any NSDraggingInfo, proposedItem item: Any?, proposedChildIndex index: Int) -> NSDragOperation {
+        if info.draggingPasteboard.types?.contains(Self.sidebarItemPasteboardType) == true {
+            guard let section = item as? SidebarSection, section == .favorites, index != NSOutlineViewDropOnItemIndex else {
+                return []
+            }
+            let builtInCount = SidebarItem.builtInFavorites.count
+            if index < builtInCount {
+                outlineView.setDropItem(item, dropChildIndex: builtInCount)
+            }
+            return .move
+        }
+
+        guard let section = item as? SidebarSection, section == .favorites else {
+            if let sidebarItem = item as? SidebarItem, sidebarItem.section == .favorites {
+                let favoritesSection = sections[0]
+                let favoritesItems = items[.favorites] ?? []
+                outlineView.setDropItem(favoritesSection, dropChildIndex: favoritesItems.count)
+                return validateExternalDrop(info)
+            }
+            return []
+        }
+
+        return validateExternalDrop(info)
+    }
+
+    private func validateExternalDrop(_ info: any NSDraggingInfo) -> NSDragOperation {
+        guard let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [
+            .urlReadingFileURLsOnly: true,
+        ]) as? [URL] else {
+            return []
+        }
+
+        for url in urls {
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else {
+                return []
+            }
+        }
+
+        return urls.isEmpty ? [] : .copy
+    }
+
+    func outlineView(_ outlineView: NSOutlineView, acceptDrop info: any NSDraggingInfo, item: Any?, childIndex index: Int) -> Bool {
+        if info.draggingPasteboard.types?.contains(Self.sidebarItemPasteboardType) == true {
+            return acceptReorderDrop(info: info, targetIndex: index)
+        }
+        return acceptExternalDrop(info: info, targetIndex: index)
+    }
+
+    private func acceptReorderDrop(info: any NSDraggingInfo, targetIndex: Int) -> Bool {
+        guard let path = info.draggingPasteboard.string(forType: Self.sidebarItemPasteboardType) else { return false }
+
+        let allFavorites = items[.favorites] ?? []
+        let builtInCount = SidebarItem.builtInFavorites.count
+
+        guard let sourceIndex = allFavorites.firstIndex(where: { $0.url.path == path }) else { return false }
+        let draggedItem = allFavorites[sourceIndex]
+
+        guard !draggedItem.isBuiltIn else { return false }
+
+        var customFavs = SidebarItem.customFavorites
+        let customSourceIndex = sourceIndex - builtInCount
+        guard customSourceIndex >= 0, customSourceIndex < customFavs.count else { return false }
+
+        customFavs.remove(at: customSourceIndex)
+
+        var adjustedTarget = targetIndex
+        if sourceIndex < targetIndex {
+            adjustedTarget -= 1
+        }
+        var customTargetIndex = adjustedTarget - builtInCount
+        if customTargetIndex < 0 { customTargetIndex = 0 }
+        if customTargetIndex > customFavs.count { customTargetIndex = customFavs.count }
+
+        customFavs.insert(draggedItem, at: customTargetIndex)
+
+        SidebarItem.saveCustomFavorites(customFavs)
+        reloadItems()
+        outlineView.reloadData()
+        for section in sections {
+            outlineView.expandItem(section)
+        }
+        return true
+    }
+
+    private func acceptExternalDrop(info: any NSDraggingInfo, targetIndex: Int) -> Bool {
+        guard let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [
+            .urlReadingFileURLsOnly: true,
+        ]) as? [URL] else {
+            return false
+        }
+
+        var customFavs = SidebarItem.customFavorites
+        let allFavorites = items[.favorites] ?? []
+
+        for url in urls {
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else {
+                continue
+            }
+
+            if allFavorites.contains(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) {
+                continue
+            }
+            if customFavs.contains(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) {
+                continue
+            }
+
+            let title = url.lastPathComponent
+            let newItem = SidebarItem(
+                title: title,
+                url: url,
+                systemImage: "folder",
+                section: .favorites,
+                isBuiltIn: false
+            )
+            customFavs.append(newItem)
+        }
+
+        SidebarItem.saveCustomFavorites(customFavs)
+        reloadItems()
+        outlineView.reloadData()
+        for section in sections {
+            outlineView.expandItem(section)
+        }
+        return true
+    }
+
     // MARK: - NSOutlineViewDelegate
 
     func outlineView(_ outlineView: NSOutlineView, isGroupItem item: Any) -> Bool {
@@ -134,6 +292,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             cell.textField?.stringValue = section.rawValue
             cell.textField?.font = .systemFont(ofSize: 11, weight: .semibold)
             cell.textField?.textColor = .secondaryLabelColor
+            cell.setAccessibilityLabel("Section: \(section.rawValue)")
+            cell.setAccessibilityRole(.group)
             return cell
         }
 
@@ -170,6 +330,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             cell.textField?.stringValue = sidebarItem.title
             cell.imageView?.image = NSImage(systemSymbolName: sidebarItem.systemImage, accessibilityDescription: sidebarItem.title)
             cell.imageView?.contentTintColor = .controlAccentColor
+            cell.setAccessibilityLabel("\(sidebarItem.title) - \(sidebarItem.url.path)")
+            cell.setAccessibilityIdentifier("sidebar_\(sidebarItem.title)")
             return cell
         }
 
@@ -196,5 +358,46 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             }
         }
         outlineView.deselectAll(nil)
+    }
+
+    // MARK: - Context Menu Action
+
+    @objc private func removeFromSidebar(_ sender: Any) {
+        let clickedRow = outlineView.clickedRow
+        guard clickedRow >= 0,
+              let sidebarItem = outlineView.item(atRow: clickedRow) as? SidebarItem,
+              sidebarItem.section == .favorites,
+              !sidebarItem.isBuiltIn else { return }
+
+        var customFavs = SidebarItem.customFavorites
+        customFavs.removeAll { $0.url.path == sidebarItem.url.path }
+        SidebarItem.saveCustomFavorites(customFavs)
+        reloadItems()
+        outlineView.reloadData()
+        for section in sections {
+            outlineView.expandItem(section)
+        }
+    }
+}
+
+// MARK: - NSMenuDelegate
+
+extension SidebarViewController: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+
+        let clickedRow = outlineView.clickedRow
+        guard clickedRow >= 0,
+              let sidebarItem = outlineView.item(atRow: clickedRow) as? SidebarItem,
+              sidebarItem.section == .favorites,
+              !sidebarItem.isBuiltIn else { return }
+
+        let removeItem = NSMenuItem(
+            title: "Remove from Sidebar",
+            action: #selector(removeFromSidebar(_:)),
+            keyEquivalent: ""
+        )
+        removeItem.target = self
+        menu.addItem(removeItem)
     }
 }

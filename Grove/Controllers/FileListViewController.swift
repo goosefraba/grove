@@ -1,12 +1,13 @@
 import AppKit
 import QuickLookUI
+import UniformTypeIdentifiers
 
 protocol FileListViewControllerDelegate: AnyObject {
     func fileListDidNavigate(to url: URL)
-    func fileListDidSelect(item: FileItem?)
+    func fileListDidSelect(items: [FileItem])
 }
 
-final class FileListViewController: NSViewController,
+final class FileListViewController: NSViewController, FileViewControllerProtocol,
     NSTableViewDataSource, NSTableViewDelegate,
     QLPreviewPanelDataSource, QLPreviewPanelDelegate {
 
@@ -16,12 +17,27 @@ final class FileListViewController: NSViewController,
     private let tableView = NSTableView()
     private let statusBar = NSTextField(labelWithString: "")
     private let emptyLabel = NSTextField(labelWithString: "Empty Folder")
+    private let searchScopeLabel = NSTextField(labelWithString: "")
+    private let loadingSpinner = NSProgressIndicator()
 
+    private var allItems: [FileItem] = []
     private var items: [FileItem] = []
     private var sortKey: String = "name"
     private var sortAscending: Bool = true
     private(set) var currentURL: URL = FileManager.default.homeDirectoryForCurrentUser
     var showHiddenFiles: Bool = false
+    private var isShowingSearchResults: Bool = false
+    private var folderSizes: [URL: Int64] = [:]
+
+    var filterText: String = "" {
+        didSet {
+            applyFilter()
+        }
+    }
+
+    private var fileUndoManager: UndoManager? {
+        view.window?.undoManager
+    }
 
     private var watcher: DirectoryWatcher?
     private var reloadWorkItem: DispatchWorkItem?
@@ -44,6 +60,9 @@ final class FileListViewController: NSViewController,
         setupTableView()
         setupStatusBar()
         setupEmptyLabel()
+        setupLoadingSpinner()
+        setupSearchScopeLabel()
+        setupAccessibility()
         loadDirectory(currentURL)
     }
 
@@ -143,8 +162,121 @@ final class FileListViewController: NSViewController,
         ])
     }
 
+    private func setupLoadingSpinner() {
+        loadingSpinner.style = .spinning
+        loadingSpinner.isIndeterminate = true
+        loadingSpinner.controlSize = .regular
+        loadingSpinner.translatesAutoresizingMaskIntoConstraints = false
+        loadingSpinner.isHidden = true
+        view.addSubview(loadingSpinner)
+
+        NSLayoutConstraint.activate([
+            loadingSpinner.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
+            loadingSpinner.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
+        ])
+    }
+
+    private func setupSearchScopeLabel() {
+        searchScopeLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        searchScopeLabel.textColor = .secondaryLabelColor
+        searchScopeLabel.backgroundColor = .controlBackgroundColor
+        searchScopeLabel.drawsBackground = true
+        searchScopeLabel.alignment = .center
+        searchScopeLabel.translatesAutoresizingMaskIntoConstraints = false
+        searchScopeLabel.isHidden = true
+        view.addSubview(searchScopeLabel)
+
+        NSLayoutConstraint.activate([
+            searchScopeLabel.topAnchor.constraint(equalTo: view.topAnchor),
+            searchScopeLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            searchScopeLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            searchScopeLabel.heightAnchor.constraint(equalToConstant: 22),
+        ])
+    }
+
+    private func setupAccessibility() {
+        tableView.setAccessibilityRole(.table)
+        tableView.setAccessibilityLabel("File list")
+        tableView.setAccessibilityIdentifier("fileListTable")
+        scrollView.setAccessibilityIdentifier("fileListScrollView")
+        statusBar.setAccessibilityIdentifier("fileListStatusBar")
+        emptyLabel.setAccessibilityIdentifier("fileListEmptyLabel")
+    }
+
+    // MARK: - Search & Filter
+
+    func applyFilter() {
+        if filterText.isEmpty {
+            items = allItems
+        } else {
+            items = allItems.filter {
+                $0.name.localizedCaseInsensitiveContains(filterText)
+            }
+        }
+        sortItems()
+        tableView.reloadData()
+        updateStatusBar()
+        emptyLabel.isHidden = !items.isEmpty
+        if items.isEmpty && !filterText.isEmpty {
+            emptyLabel.stringValue = "No items match \"\(filterText)\""
+        }
+    }
+
+    func performSpotlightSearch(_ query: String) {
+        guard !query.isEmpty else {
+            clearSearch()
+            return
+        }
+        isShowingSearchResults = true
+        searchScopeLabel.stringValue = "Searching in: \(currentURL.lastPathComponent)"
+        searchScopeLabel.isHidden = false
+        updateScrollViewTop()
+
+        SearchService.shared.search(query: query, in: currentURL) { [weak self] results in
+            guard let self = self, self.isShowingSearchResults else { return }
+            self.allItems = results
+            self.items = results
+            self.sortItems()
+            self.tableView.reloadData()
+            self.updateStatusBar()
+            self.emptyLabel.isHidden = !results.isEmpty
+            if results.isEmpty {
+                self.emptyLabel.stringValue = "No results for \"\(query)\""
+            }
+        }
+    }
+
+    func clearSearch() {
+        isShowingSearchResults = false
+        searchScopeLabel.isHidden = true
+        updateScrollViewTop()
+        SearchService.shared.stop()
+        filterText = ""
+        reloadContents()
+    }
+
+    private func updateScrollViewTop() {
+        for constraint in view.constraints {
+            if constraint.firstItem === scrollView && constraint.firstAnchor === scrollView.topAnchor {
+                constraint.isActive = false
+            }
+        }
+        if searchScopeLabel.isHidden {
+            scrollView.topAnchor.constraint(equalTo: view.topAnchor).isActive = true
+        } else {
+            scrollView.topAnchor.constraint(equalTo: searchScopeLabel.bottomAnchor).isActive = true
+        }
+        view.needsLayout = true
+    }
+
+    // MARK: - Directory Loading
+
     func loadDirectory(_ url: URL) {
         currentURL = url
+        filterText = ""
+        isShowingSearchResults = false
+        searchScopeLabel.isHidden = true
+        SearchService.shared.stop()
 
         watcher?.stop()
         watcher = DirectoryWatcher(url: url) { [weak self] in
@@ -164,29 +296,66 @@ final class FileListViewController: NSViewController,
     }
 
     private func reloadContents() {
+        guard !isShowingSearchResults else { return }
         let selectedURLs = Set(selectedItems.map(\.url))
-        do {
-            items = try FileOperationService.shared.contentsOfDirectory(at: currentURL, showHidden: showHiddenFiles)
-            sortItems()
-            tableView.reloadData()
-            // Restore selection
-            let newSelection = IndexSet(items.indices.filter { selectedURLs.contains(items[$0].url) })
-            if !newSelection.isEmpty {
-                tableView.selectRowIndexes(newSelection, byExtendingSelection: false)
+
+        loadingSpinner.isHidden = false
+        loadingSpinner.startAnimation(nil)
+        emptyLabel.isHidden = true
+
+        FileOperationService.shared.contentsOfDirectoryAsync(at: currentURL, showHidden: showHiddenFiles) { [weak self] result in
+            guard let self = self else { return }
+            self.loadingSpinner.stopAnimation(nil)
+            self.loadingSpinner.isHidden = true
+
+            switch result {
+            case .success(let loadedItems):
+                self.allItems = loadedItems
+                self.applyFilter()
+                // Restore selection
+                let newSelection = IndexSet(self.items.indices.filter { selectedURLs.contains(self.items[$0].url) })
+                if !newSelection.isEmpty {
+                    self.tableView.selectRowIndexes(newSelection, byExtendingSelection: false)
+                }
+                if self.items.isEmpty && self.filterText.isEmpty {
+                    self.emptyLabel.stringValue = "This folder is empty"
+                    self.emptyLabel.isHidden = false
+                }
+                self.calculateVisibleFolderSizes()
+            case .failure(let error):
+                self.allItems = []
+                self.items = []
+                self.tableView.reloadData()
+                self.updateStatusBar()
+                if let nsError = error as NSError?, nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoPermissionError {
+                    self.emptyLabel.stringValue = "You don't have permission to access this folder."
+                } else {
+                    self.emptyLabel.stringValue = "Unable to load folder contents."
+                }
+                self.emptyLabel.isHidden = false
             }
-            updateStatusBar()
-            emptyLabel.stringValue = "This folder is empty"
-            emptyLabel.isHidden = !items.isEmpty
-        } catch {
-            items = []
-            tableView.reloadData()
-            updateStatusBar()
-            if let nsError = error as NSError?, nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoPermissionError {
-                emptyLabel.stringValue = "You don't have permission to access this folder."
-            } else {
-                emptyLabel.stringValue = "Unable to load folder contents."
+        }
+    }
+
+    // MARK: - Folder Sizes
+
+    private func calculateVisibleFolderSizes() {
+        for (index, item) in items.enumerated() {
+            guard item.isDirectory && !item.isPackage else { continue }
+            FolderSizeService.shared.calculateSize(for: item.url) { [weak self] size in
+                guard let self = self else { return }
+                self.folderSizes[item.url] = size
+                // Update the size cell if the row is still valid
+                if index < self.items.count && self.items[index].url == item.url {
+                    let sizeColumnIndex = self.tableView.column(withIdentifier: self.sizeColumn)
+                    if sizeColumnIndex >= 0 {
+                        self.tableView.reloadData(
+                            forRowIndexes: IndexSet(integer: index),
+                            columnIndexes: IndexSet(integer: sizeColumnIndex)
+                        )
+                    }
+                }
             }
-            emptyLabel.isHidden = false
         }
     }
 
@@ -271,15 +440,63 @@ final class FileListViewController: NSViewController,
         ]) as? [URL], !urls.isEmpty else { return }
 
         let isCut = clipboard?.isCut == true && clipboard?.urls == urls
-        do {
-            if isCut {
-                try FileOperationService.shared.move(urls, to: currentURL)
-                clipboard = nil
-            } else {
-                try FileOperationService.shared.copy(urls, to: currentURL)
+        let destination = currentURL
+
+        // Use progress sheet for operations with more than 3 files
+        if urls.count > 3, let window = view.window {
+            let progressVC = FileProgressViewController()
+
+            presentAsSheet(progressVC)
+
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                do {
+                    if isCut {
+                        try FileOperationService.shared.moveWithProgress(urls, to: destination, progress: { value, name in
+                            DispatchQueue.main.async {
+                                progressVC.updateProgress(value, fileName: name)
+                            }
+                        }, cancelled: { progressVC.isCancelled })
+                        DispatchQueue.main.async {
+                            self?.clipboard = nil
+                            self?.registerUndoMove(originalURLs: urls, destination: destination)
+                        }
+                    } else {
+                        try FileOperationService.shared.copyWithProgress(urls, to: destination, progress: { value, name in
+                            DispatchQueue.main.async {
+                                progressVC.updateProgress(value, fileName: name)
+                            }
+                        }, cancelled: { progressVC.isCancelled })
+                        DispatchQueue.main.async {
+                            let copiedURLs = urls.map { destination.appendingPathComponent($0.lastPathComponent) }
+                            self?.registerUndoCopy(copiedURLs: copiedURLs)
+                        }
+                    }
+                    DispatchQueue.main.async {
+                        window.endSheet(window.attachedSheet ?? NSWindow())
+                        self?.dismiss(progressVC)
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        window.endSheet(window.attachedSheet ?? NSWindow())
+                        self?.dismiss(progressVC)
+                        self?.showError(error)
+                    }
+                }
             }
-        } catch {
-            showError(error)
+        } else {
+            do {
+                if isCut {
+                    try FileOperationService.shared.move(urls, to: destination)
+                    clipboard = nil
+                    registerUndoMove(originalURLs: urls, destination: destination)
+                } else {
+                    try FileOperationService.shared.copy(urls, to: destination)
+                    let copiedURLs = urls.map { destination.appendingPathComponent($0.lastPathComponent) }
+                    registerUndoCopy(copiedURLs: copiedURLs)
+                }
+            } catch {
+                showError(error)
+            }
         }
     }
 
@@ -300,7 +517,8 @@ final class FileListViewController: NSViewController,
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
             do {
-                _ = try FileOperationService.shared.moveToTrash(urls)
+                let trashURLs = try FileOperationService.shared.moveToTrash(urls)
+                self?.registerUndoTrash(originalURLs: urls, trashURLs: trashURLs)
             } catch {
                 self?.showError(error)
             }
@@ -347,6 +565,89 @@ final class FileListViewController: NSViewController,
     func toggleHiddenFiles() {
         showHiddenFiles.toggle()
         reloadContents()
+    }
+
+    func duplicateSelectedFiles() {
+        let urls = selectedItems.map(\.url)
+        guard !urls.isEmpty else { return }
+
+        var duplicatedURLs: [URL] = []
+        do {
+            for url in urls {
+                let newURL = try FileOperationService.shared.duplicate(url)
+                duplicatedURLs.append(newURL)
+            }
+            registerUndoCopy(copiedURLs: duplicatedURLs)
+        } catch {
+            showError(error)
+        }
+    }
+
+    func batchRenameSelectedFiles() {
+        let urls = selectedItems.map(\.url)
+        guard urls.count > 1 else { return }
+
+        let batchVC = BatchRenameViewController(urls: urls)
+        batchVC.delegate = self
+        presentAsSheet(batchVC)
+    }
+
+    // MARK: - Undo Registration
+
+    private func registerUndoTrash(originalURLs: [URL], trashURLs: [URL]) {
+        guard let undoManager = fileUndoManager else { return }
+        undoManager.registerUndo(withTarget: self) { target in
+            do {
+                for (original, trashURL) in zip(originalURLs, trashURLs) {
+                    let destination = original.deletingLastPathComponent()
+                    try FileOperationService.shared.move([trashURL], to: destination)
+                }
+            } catch {
+                target.showError(error)
+            }
+        }
+        undoManager.setActionName("Move to Trash")
+    }
+
+    private func registerUndoMove(originalURLs: [URL], destination: URL) {
+        guard let undoManager = fileUndoManager else { return }
+        undoManager.registerUndo(withTarget: self) { target in
+            do {
+                let movedURLs = originalURLs.map { destination.appendingPathComponent($0.lastPathComponent) }
+                for (movedURL, original) in zip(movedURLs, originalURLs) {
+                    let originalDir = original.deletingLastPathComponent()
+                    try FileOperationService.shared.move([movedURL], to: originalDir)
+                }
+            } catch {
+                target.showError(error)
+            }
+        }
+        undoManager.setActionName("Move")
+    }
+
+    private func registerUndoRename(originalURL: URL, newURL: URL) {
+        guard let undoManager = fileUndoManager else { return }
+        let originalName = originalURL.lastPathComponent
+        undoManager.registerUndo(withTarget: self) { target in
+            do {
+                _ = try FileOperationService.shared.rename(newURL, to: originalName)
+            } catch {
+                target.showError(error)
+            }
+        }
+        undoManager.setActionName("Rename")
+    }
+
+    private func registerUndoCopy(copiedURLs: [URL]) {
+        guard let undoManager = fileUndoManager else { return }
+        undoManager.registerUndo(withTarget: self) { target in
+            do {
+                _ = try FileOperationService.shared.moveToTrash(copiedURLs)
+            } catch {
+                target.showError(error)
+            }
+        }
+        undoManager.setActionName("Copy")
     }
 
     private func showError(_ error: Error) {
@@ -469,13 +770,33 @@ final class FileListViewController: NSViewController,
         switch columnID {
         case nameColumn:
             cell.textField?.stringValue = item.name
-            cell.imageView?.image = ThumbnailCache.shared.icon(for: item.url)
+            let itemURL = item.url
+            cell.imageView?.image = ThumbnailCache.shared.iconAsync(for: itemURL) { [weak self] icon in
+                guard let self = self else { return }
+                // Find current row for this URL and reload if visible
+                guard let currentRow = self.items.firstIndex(where: { $0.url == itemURL }) else { return }
+                let visibleRows = self.tableView.rows(in: self.tableView.visibleRect)
+                if visibleRows.contains(currentRow) {
+                    let columnIndex = self.tableView.column(withIdentifier: self.nameColumn)
+                    if columnIndex >= 0 {
+                        self.tableView.reloadData(forRowIndexes: IndexSet(integer: currentRow), columnIndexes: IndexSet(integer: columnIndex))
+                    }
+                }
+            }
+            cell.setAccessibilityLabel("\(item.name), \(item.kind)\(item.isDirectory ? ", folder" : "")")
         case dateColumn:
             cell.textField?.stringValue = item.formattedDateModified
+            cell.setAccessibilityLabel("Modified: \(item.formattedDateModified)")
         case sizeColumn:
-            cell.textField?.stringValue = item.formattedSize
+            if item.isDirectory && !item.isPackage, let cachedSize = folderSizes[item.url] {
+                cell.textField?.stringValue = ByteCountFormatter.string(fromByteCount: cachedSize, countStyle: .file)
+            } else {
+                cell.textField?.stringValue = item.formattedSize
+            }
+            cell.setAccessibilityLabel("Size: \(cell.textField?.stringValue ?? item.formattedSize)")
         case kindColumn:
             cell.textField?.stringValue = item.kind
+            cell.setAccessibilityLabel("Kind: \(item.kind)")
         default:
             break
         }
@@ -493,8 +814,7 @@ final class FileListViewController: NSViewController,
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
-        let selected = selectedItems.first
-        delegate?.fileListDidSelect(item: selected)
+        delegate?.fileListDidSelect(items: selectedItems)
         updateStatusBar()
     }
 
@@ -576,7 +896,8 @@ extension FileListViewController: NSTextFieldDelegate {
 
         if newName != item.name && !newName.isEmpty {
             do {
-                _ = try FileOperationService.shared.rename(item.url, to: newName)
+                let newURL = try FileOperationService.shared.rename(item.url, to: newName)
+                registerUndoRename(originalURL: item.url, newURL: newURL)
             } catch {
                 showError(error)
             }
@@ -610,6 +931,11 @@ extension FileListViewController: NSMenuDelegate {
             menu.addItem(.separator())
             let infoItem = menu.addItem(withTitle: "Get Info", action: #selector(contextGetInfoCurrentFolder(_:)), keyEquivalent: "")
             infoItem.target = self
+
+            menu.addItem(.separator())
+            let terminalItem = menu.addItem(withTitle: "Open in Terminal", action: #selector(contextOpenInTerminal(_:)), keyEquivalent: "")
+            terminalItem.target = self
+            terminalItem.representedObject = currentURL
             return
         }
 
@@ -619,17 +945,66 @@ extension FileListViewController: NSMenuDelegate {
         }
 
         menu.addItem(withTitle: "Open", action: #selector(contextOpen(_:)), keyEquivalent: "")
+
+        // Open With submenu
+        if let clickedItem = clickedRow < items.count ? items[clickedRow] : nil {
+            let openWithSubmenu = buildOpenWithSubmenu(for: clickedItem.url)
+            let openWithItem = NSMenuItem(title: "Open With", action: nil, keyEquivalent: "")
+            openWithItem.submenu = openWithSubmenu
+            menu.addItem(openWithItem)
+        }
+
         menu.addItem(withTitle: "Quick Look", action: #selector(contextQuickLook(_:)), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Copy", action: #selector(contextCopy(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Cut", action: #selector(contextCut(_:)), keyEquivalent: "")
+        menu.addItem(withTitle: "Duplicate", action: #selector(contextDuplicate(_:)), keyEquivalent: "")
+        menu.addItem(.separator())
+
+        // Copy Path submenu
+        let copyPathSubmenu = NSMenu()
+        let posixItem = copyPathSubmenu.addItem(withTitle: "POSIX Path", action: #selector(contextCopyPosixPath(_:)), keyEquivalent: "")
+        posixItem.target = self
+        let urlItem = copyPathSubmenu.addItem(withTitle: "File URL", action: #selector(contextCopyFileURL(_:)), keyEquivalent: "")
+        urlItem.target = self
+        let tildeItem = copyPathSubmenu.addItem(withTitle: "Tilde Path", action: #selector(contextCopyTildePath(_:)), keyEquivalent: "")
+        tildeItem.target = self
+
+        let copyPathMainItem = NSMenuItem(title: "Copy Path", action: #selector(contextCopyPosixPath(_:)), keyEquivalent: "")
+        copyPathMainItem.target = self
+
+        let copyPathAsItem = NSMenuItem(title: "Copy Path as...", action: nil, keyEquivalent: "")
+        copyPathAsItem.submenu = copyPathSubmenu
+        menu.addItem(copyPathMainItem)
+        menu.addItem(copyPathAsItem)
+
         menu.addItem(.separator())
         menu.addItem(withTitle: "Rename", action: #selector(contextRename(_:)), keyEquivalent: "")
         menu.addItem(withTitle: "Move to Trash", action: #selector(contextTrash(_:)), keyEquivalent: "")
         menu.addItem(.separator())
+
+        // Tags submenu
+        let tagsSubmenu = buildTagsSubmenu()
+        let tagsItem = NSMenuItem(title: "Tags", action: nil, keyEquivalent: "")
+        tagsItem.submenu = tagsSubmenu
+        menu.addItem(tagsItem)
+
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Reveal in Finder", action: #selector(contextGetInfo(_:)), keyEquivalent: "")
 
-        for item in menu.items {
+        // Open in Terminal
+        let terminalItem = NSMenuItem(title: "Open in Terminal", action: #selector(contextOpenInTerminal(_:)), keyEquivalent: "")
+        terminalItem.target = self
+        if let clickedItem = clickedRow < items.count ? items[clickedRow] : nil {
+            if clickedItem.isDirectory && !clickedItem.isPackage {
+                terminalItem.representedObject = clickedItem.url
+            } else {
+                terminalItem.representedObject = clickedItem.url.deletingLastPathComponent()
+            }
+        }
+        menu.addItem(terminalItem)
+
+        for item in menu.items where item.target == nil && item.action != nil && item.submenu == nil {
             item.target = self
         }
     }
@@ -675,5 +1050,183 @@ extension FileListViewController: NSMenuDelegate {
 
     @objc private func contextGetInfoCurrentFolder(_ sender: Any?) {
         NSWorkspace.shared.activateFileViewerSelecting([currentURL])
+    }
+
+    @objc private func contextDuplicate(_ sender: Any?) {
+        duplicateSelectedFiles()
+    }
+
+    // MARK: - Open With
+
+    private func buildOpenWithSubmenu(for url: URL) -> NSMenu {
+        let submenu = NSMenu()
+
+        let appURLs = NSWorkspace.shared.urlsForApplications(toOpen: url)
+
+        for appURL in appURLs {
+            let appName = FileManager.default.displayName(atPath: appURL.path)
+            let menuItem = NSMenuItem(title: appName, action: #selector(contextOpenWith(_:)), keyEquivalent: "")
+            menuItem.target = self
+            menuItem.representedObject = appURL
+            if let icon = NSWorkspace.shared.icon(forFile: appURL.path).copy() as? NSImage {
+                icon.size = NSSize(width: 16, height: 16)
+                menuItem.image = icon
+            }
+            submenu.addItem(menuItem)
+        }
+
+        if !appURLs.isEmpty {
+            submenu.addItem(.separator())
+        }
+
+        let otherItem = NSMenuItem(title: "Other...", action: #selector(contextOpenWithOther(_:)), keyEquivalent: "")
+        otherItem.target = self
+        submenu.addItem(otherItem)
+
+        return submenu
+    }
+
+    @objc private func contextOpenWith(_ sender: NSMenuItem) {
+        guard let appURL = sender.representedObject as? URL else { return }
+        let urls = selectedItems.map(\.url)
+        guard !urls.isEmpty else { return }
+
+        let config = NSWorkspace.OpenConfiguration()
+        NSWorkspace.shared.open(urls, withApplicationAt: appURL, configuration: config)
+    }
+
+    @objc private func contextOpenWithOther(_ sender: Any?) {
+        let urls = selectedItems.map(\.url)
+        guard !urls.isEmpty else { return }
+
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowedContentTypes = [.application]
+        panel.message = "Choose an application to open the selected file(s)."
+
+        guard let window = view.window else { return }
+        panel.beginSheetModal(for: window) { response in
+            guard response == .OK, let appURL = panel.url else { return }
+            let config = NSWorkspace.OpenConfiguration()
+            NSWorkspace.shared.open(urls, withApplicationAt: appURL, configuration: config)
+        }
+    }
+
+    // MARK: - Copy Path
+
+    @objc private func contextCopyPosixPath(_ sender: Any?) {
+        let paths = selectedItems.map(\.url.path)
+        guard !paths.isEmpty else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(paths.joined(separator: "\n"), forType: .string)
+    }
+
+    @objc private func contextCopyFileURL(_ sender: Any?) {
+        let urls = selectedItems.map(\.url.absoluteString)
+        guard !urls.isEmpty else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(urls.joined(separator: "\n"), forType: .string)
+    }
+
+    @objc private func contextCopyTildePath(_ sender: Any?) {
+        let paths = selectedItems.map { (item: FileItem) -> String in
+            (item.url.path as NSString).abbreviatingWithTildeInPath
+        }
+        guard !paths.isEmpty else { return }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(paths.joined(separator: "\n"), forType: .string)
+    }
+
+    // MARK: - Open in Terminal
+
+    @objc private func contextOpenInTerminal(_ sender: NSMenuItem) {
+        let targetURL: URL
+        if let url = sender.representedObject as? URL {
+            targetURL = url
+        } else {
+            targetURL = currentURL
+        }
+
+        let escapedPath = targetURL.path
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let script = "tell application \"Terminal\"\nactivate\ndo script \"cd \\\"\\(escapedPath)\\\"\"\nend tell"
+
+        if let appleScript = NSAppleScript(source: script) {
+            var error: NSDictionary?
+            appleScript.executeAndReturnError(&error)
+        }
+    }
+
+    // MARK: - Tags
+
+    private func buildTagsSubmenu() -> NSMenu {
+        let menu = NSMenu()
+        let selected = selectedItems
+        let currentTags: Set<String> = {
+            guard let first = selected.first else { return [] }
+            if selected.count == 1 { return Set(first.tags) }
+            // For multiple selection, show common tags as checked
+            return Set(first.tags).intersection(selected.dropFirst().reduce(Set(first.tags)) { $0.intersection(Set($1.tags)) })
+        }()
+
+        let standardTags = ["Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Gray"]
+        for tagName in standardTags {
+            let item = NSMenuItem(title: tagName, action: #selector(toggleTag(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = tagName
+
+            // Add colored dot image
+            let dotImage = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { rect in
+                TagColors.nsColor(for: tagName).setFill()
+                NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+                return true
+            }
+            item.image = dotImage
+
+            if currentTags.contains(tagName) {
+                item.state = .on
+            }
+            menu.addItem(item)
+        }
+
+        return menu
+    }
+
+    @objc private func toggleTag(_ sender: NSMenuItem) {
+        guard let tagName = sender.representedObject as? String else { return }
+        let selected = selectedItems
+        guard !selected.isEmpty else { return }
+
+        for item in selected {
+            var tags = item.tags
+            if tags.contains(tagName) {
+                tags.removeAll { $0 == tagName }
+            } else {
+                tags.append(tagName)
+            }
+            do {
+                try FileItem.setTags(tags, for: item.url)
+            } catch {
+                showError(error)
+            }
+        }
+
+        // Reload to reflect tag changes
+        reloadContents()
+    }
+}
+
+// MARK: - BatchRenameViewControllerDelegate
+
+extension FileListViewController: BatchRenameViewControllerDelegate {
+    func batchRenameDidComplete() {
+        reloadContents()
     }
 }

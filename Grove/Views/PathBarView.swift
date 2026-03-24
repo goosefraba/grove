@@ -54,6 +54,12 @@ final class PathBarView: NSView {
             button.font = .systemFont(ofSize: 12)
             button.tag = index
             button.toolTip = component.path
+            button.setAccessibilityLabel("Path component: \(component.path)")
+            button.setAccessibilityIdentifier("pathBarComponent_\(index)")
+
+            // Enable right-click/click-hold for dropdown
+            button.sendAction(on: [.leftMouseDown])
+
             buttons.append(button)
             stackView.addArrangedSubview(button)
         }
@@ -61,6 +67,77 @@ final class PathBarView: NSView {
 
     @objc private func pathComponentClicked(_ sender: NSButton) {
         guard sender.tag < currentComponents.count else { return }
-        onPathComponentClicked?(currentComponents[sender.tag])
+        let clickedURL = currentComponents[sender.tag]
+
+        guard let event = NSApp.currentEvent else {
+            onPathComponentClicked?(clickedURL)
+            return
+        }
+
+        // Show sibling dropdown on click
+        showSiblingMenu(for: clickedURL, relativeTo: sender, event: event)
+    }
+
+    private func showSiblingMenu(for url: URL, relativeTo button: NSButton, event: NSEvent) {
+        let parentURL = url.deletingLastPathComponent()
+
+        // Build menu with sibling directories
+        let menu = NSMenu()
+
+        // Add current directory item at top, checked
+        let currentItem = NSMenuItem(title: url.displayName, action: #selector(siblingMenuItemClicked(_:)), keyEquivalent: "")
+        currentItem.target = self
+        currentItem.representedObject = url
+        currentItem.image = iconForURL(url)
+        currentItem.state = .on
+        menu.addItem(currentItem)
+
+        // Enumerate sibling directories
+        let siblings = siblingDirectories(of: url, in: parentURL)
+        if !siblings.isEmpty {
+            menu.addItem(.separator())
+            for sibling in siblings {
+                let item = NSMenuItem(title: sibling.displayName, action: #selector(siblingMenuItemClicked(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = sibling
+                item.image = iconForURL(sibling)
+                menu.addItem(item)
+            }
+        }
+
+        // Show the menu below the button
+        let point = NSPoint(x: 0, y: button.bounds.maxY + 2)
+        menu.popUp(positioning: nil, at: point, in: button)
+    }
+
+    private func siblingDirectories(of url: URL, in parentURL: URL) -> [URL] {
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: parentURL,
+            includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey, .isHiddenKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return []
+        }
+
+        return contents
+            .filter { childURL in
+                guard childURL.standardizedFileURL != url.standardizedFileURL else { return false }
+                let values = try? childURL.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
+                let isDir = values?.isDirectory ?? false
+                let isPackage = values?.isPackage ?? false
+                return isDir && !isPackage
+            }
+            .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
+    }
+
+    private func iconForURL(_ url: URL) -> NSImage {
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        icon.size = NSSize(width: 16, height: 16)
+        return icon
+    }
+
+    @objc private func siblingMenuItemClicked(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        onPathComponentClicked?(url)
     }
 }

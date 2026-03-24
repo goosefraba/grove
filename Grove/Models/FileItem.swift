@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import UniformTypeIdentifiers
+import ImageIO
 
 struct FileItem: Identifiable, Hashable {
     let id: URL
@@ -14,10 +15,41 @@ struct FileItem: Identifiable, Hashable {
     let dateCreated: Date
     let kind: String
     let contentType: UTType?
+    let posixPermissions: UInt16
+    let tags: [String]
 
     var isApplication: Bool {
         contentType?.conforms(to: .application) ?? false ||
         url.pathExtension.lowercased() == "app"
+    }
+
+    var isImage: Bool {
+        contentType?.conforms(to: .image) ?? false
+    }
+
+    var formattedPermissions: String {
+        let perms = posixPermissions
+        let chars: [(UInt16, Character)] = [
+            (0o400, "r"), (0o200, "w"), (0o100, "x"),
+            (0o040, "r"), (0o020, "w"), (0o010, "x"),
+            (0o004, "r"), (0o002, "w"), (0o001, "x"),
+        ]
+        return String(chars.map { perms & $0.0 != 0 ? $0.1 : "-" })
+    }
+
+    var octalPermissions: String {
+        String(format: "%o", posixPermissions)
+    }
+
+    var imageDimensions: NSSize? {
+        guard isImage else { return nil }
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int else {
+            return nil
+        }
+        return NSSize(width: width, height: height)
     }
 
     func hash(into hasher: inout Hasher) {
@@ -32,12 +64,18 @@ struct FileItem: Identifiable, Hashable {
         let keys: Set<URLResourceKey> = [
             .nameKey, .isDirectoryKey, .isPackageKey, .isHiddenKey,
             .fileSizeKey, .contentModificationDateKey, .creationDateKey,
-            .localizedTypeDescriptionKey, .contentTypeKey
+            .localizedTypeDescriptionKey, .contentTypeKey, .tagNamesKey
         ]
 
         guard let values = try? url.resourceValues(forKeys: keys) else {
             return nil
         }
+
+        let perms: UInt16 = {
+            guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+                  let p = attrs[.posixPermissions] as? NSNumber else { return 0 }
+            return UInt16(p.intValue & 0o7777)
+        }()
 
         return FileItem(
             id: url,
@@ -50,8 +88,14 @@ struct FileItem: Identifiable, Hashable {
             dateModified: values.contentModificationDate ?? Date.distantPast,
             dateCreated: values.creationDate ?? Date.distantPast,
             kind: values.localizedTypeDescription ?? "Document",
-            contentType: values.contentType
+            contentType: values.contentType,
+            posixPermissions: perms,
+            tags: values.tagNames ?? []
         )
+    }
+
+    static func setTags(_ tags: [String], for url: URL) throws {
+        try (url as NSURL).setResourceValue(tags, forKey: .tagNamesKey)
     }
 
     var formattedSize: String {

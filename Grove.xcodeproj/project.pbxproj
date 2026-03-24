@@ -25,6 +25,18 @@
 		A10000010000000000000010 /* URL+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000010 /* URL+Extensions.swift */; };
 		A10000010000000000000011 /* NSImage+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000011 /* NSImage+Extensions.swift */; };
 		A10000010000000000000012 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000012 /* Assets.xcassets */; };
+		A10000010000000000000020 /* GoToFolderPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000020 /* GoToFolderPanelController.swift */; };
+		A10000010000000000000021 /* ColumnViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000021 /* ColumnViewController.swift */; };
+		A10000010000000000000022 /* DualPaneViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000022 /* DualPaneViewController.swift */; };
+		A10000010000000000000023 /* FileViewControllerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000023 /* FileViewControllerProtocol.swift */; };
+		A10000010000000000000024 /* GalleryViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000024 /* GalleryViewController.swift */; };
+		A10000010000000000000025 /* IconViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000025 /* IconViewController.swift */; };
+		A10000010000000000000026 /* PreviewPaneController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000026 /* PreviewPaneController.swift */; };
+		A10000010000000000000027 /* FileProgressViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000027 /* FileProgressViewController.swift */; };
+		A10000010000000000000028 /* BatchRenameViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000028 /* BatchRenameViewController.swift */; };
+		A10000010000000000000029 /* SearchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000010000000000000029 /* SearchService.swift */; };
+		A1000001000000000000002A /* FolderSizeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001000000000000002A /* FolderSizeService.swift */; };
+		A1000001000000000000002B /* TagView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1000001000000000000002B /* TagView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -49,6 +61,18 @@
 		B10000010000000000000013 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B10000010000000000000014 /* Grove.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Grove.entitlements; sourceTree = "<group>"; };
 		C10000010000000000000001 /* Grove.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Grove.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B10000010000000000000020 /* GoToFolderPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoToFolderPanelController.swift; sourceTree = "<group>"; };
+		B10000010000000000000021 /* ColumnViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColumnViewController.swift; sourceTree = "<group>"; };
+		B10000010000000000000022 /* DualPaneViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DualPaneViewController.swift; sourceTree = "<group>"; };
+		B10000010000000000000023 /* FileViewControllerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileViewControllerProtocol.swift; sourceTree = "<group>"; };
+		B10000010000000000000024 /* GalleryViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalleryViewController.swift; sourceTree = "<group>"; };
+		B10000010000000000000025 /* IconViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IconViewController.swift; sourceTree = "<group>"; };
+		B10000010000000000000026 /* PreviewPaneController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewPaneController.swift; sourceTree = "<group>"; };
+		B10000010000000000000027 /* FileProgressViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileProgressViewController.swift; sourceTree = "<group>"; };
+		B10000010000000000000028 /* BatchRenameViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BatchRenameViewController.swift; sourceTree = "<group>"; };
+		B10000010000000000000029 /* SearchService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchService.swift; sourceTree = "<group>"; };
+		B1000001000000000000002A /* FolderSizeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderSizeService.swift; sourceTree = "<group>"; };
+		B1000001000000000000002B /* TagView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TagView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -102,6 +126,15 @@
 				B10000010000000000000005 /* SidebarViewController.swift */,
 				B10000010000000000000006 /* FileListViewController.swift */,
 				B10000010000000000000007 /* InspectorViewController.swift */,
+				B10000010000000000000020 /* GoToFolderPanelController.swift */,
+				B10000010000000000000021 /* ColumnViewController.swift */,
+				B10000010000000000000022 /* DualPaneViewController.swift */,
+				B10000010000000000000023 /* FileViewControllerProtocol.swift */,
+				B10000010000000000000024 /* GalleryViewController.swift */,
+				B10000010000000000000025 /* IconViewController.swift */,
+				B10000010000000000000026 /* PreviewPaneController.swift */,
+				B10000010000000000000027 /* FileProgressViewController.swift */,
+				B10000010000000000000028 /* BatchRenameViewController.swift */,
 			);
 			path = Controllers;
 			sourceTree = "<group>";
@@ -122,6 +155,8 @@
 				B1000001000000000000000B /* FileOperationService.swift */,
 				B1000001000000000000000C /* DirectoryWatcher.swift */,
 				B1000001000000000000000D /* ThumbnailCache.swift */,
+				B10000010000000000000029 /* SearchService.swift */,
+				B1000001000000000000002A /* FolderSizeService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -131,6 +166,7 @@
 			children = (
 				B1000001000000000000000E /* InspectorView.swift */,
 				B1000001000000000000000F /* PathBarView.swift */,
+				B1000001000000000000002B /* TagView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -247,6 +283,18 @@
 				A1000001000000000000000F /* PathBarView.swift in Sources */,
 				A10000010000000000000010 /* URL+Extensions.swift in Sources */,
 				A10000010000000000000011 /* NSImage+Extensions.swift in Sources */,
+				A10000010000000000000020 /* GoToFolderPanelController.swift in Sources */,
+				A10000010000000000000021 /* ColumnViewController.swift in Sources */,
+				A10000010000000000000022 /* DualPaneViewController.swift in Sources */,
+				A10000010000000000000023 /* FileViewControllerProtocol.swift in Sources */,
+				A10000010000000000000024 /* GalleryViewController.swift in Sources */,
+				A10000010000000000000025 /* IconViewController.swift in Sources */,
+				A10000010000000000000026 /* PreviewPaneController.swift in Sources */,
+				A10000010000000000000027 /* FileProgressViewController.swift in Sources */,
+				A10000010000000000000028 /* BatchRenameViewController.swift in Sources */,
+				A10000010000000000000029 /* SearchService.swift in Sources */,
+				A1000001000000000000002A /* FolderSizeService.swift in Sources */,
+				A1000001000000000000002B /* TagView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

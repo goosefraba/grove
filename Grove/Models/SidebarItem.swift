@@ -10,8 +10,17 @@ struct SidebarItem: Hashable {
     let url: URL
     let systemImage: String
     let section: SidebarSection
+    let isBuiltIn: Bool
 
-    static let favorites: [SidebarItem] = [
+    init(title: String, url: URL, systemImage: String, section: SidebarSection, isBuiltIn: Bool = true) {
+        self.title = title
+        self.url = url
+        self.systemImage = systemImage
+        self.section = section
+        self.isBuiltIn = isBuiltIn
+    }
+
+    static let builtInFavorites: [SidebarItem] = [
         SidebarItem(
             title: "Home",
             url: FileManager.default.homeDirectoryForCurrentUser,
@@ -43,6 +52,43 @@ struct SidebarItem: Hashable {
             section: .favorites
         ),
     ]
+
+    static var favorites: [SidebarItem] {
+        builtInFavorites + customFavorites
+    }
+
+    // MARK: - Custom Favorites Persistence
+
+    private static let customFavoritesKey = "customFavorites"
+
+    static var customFavorites: [SidebarItem] {
+        guard let dicts = UserDefaults.standard.array(forKey: customFavoritesKey) as? [[String: String]] else {
+            return []
+        }
+        return dicts.compactMap { dict in
+            guard let title = dict["title"],
+                  let path = dict["path"],
+                  let systemImage = dict["systemImage"] else { return nil }
+            return SidebarItem(
+                title: title,
+                url: URL(fileURLWithPath: path),
+                systemImage: systemImage,
+                section: .favorites,
+                isBuiltIn: false
+            )
+        }
+    }
+
+    static func saveCustomFavorites(_ items: [SidebarItem]) {
+        let dicts: [[String: String]] = items.map { item in
+            [
+                "title": item.title,
+                "path": item.url.path,
+                "systemImage": item.systemImage,
+            ]
+        }
+        UserDefaults.standard.set(dicts, forKey: customFavoritesKey)
+    }
 
     static func volumes() -> [SidebarItem] {
         let volumesURL = URL(fileURLWithPath: "/Volumes")
