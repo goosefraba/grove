@@ -201,8 +201,11 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
             item.label = "Path"
             pathBar.translatesAutoresizingMaskIntoConstraints = false
             item.view = pathBar
-            item.minSize = NSSize(width: 150, height: 22)
-            item.maxSize = NSSize(width: 500, height: 22)
+            NSLayoutConstraint.activate([
+                pathBar.widthAnchor.constraint(greaterThanOrEqualToConstant: 150),
+                pathBar.widthAnchor.constraint(lessThanOrEqualToConstant: 500),
+                pathBar.heightAnchor.constraint(equalToConstant: 22)
+            ])
             item.visibilityPriority = .low
             item.toolTip = "Path bar"
             pathBar.setAccessibilityLabel("Path bar")

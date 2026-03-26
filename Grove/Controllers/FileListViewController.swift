@@ -27,7 +27,6 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     private(set) var currentURL: URL = FileManager.default.homeDirectoryForCurrentUser
     var showHiddenFiles: Bool = false
     private var isShowingSearchResults: Bool = false
-    private var folderSizes: [URL: Int64] = [:]
 
     var filterText: String = "" {
         didSet {
@@ -321,7 +320,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
                     self.emptyLabel.stringValue = "This folder is empty"
                     self.emptyLabel.isHidden = false
                 }
-                self.calculateVisibleFolderSizes()
+                // Folder sizes calculated on-demand for visible rows only
             case .failure(let error):
                 self.allItems = []
                 self.items = []
@@ -333,28 +332,6 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
                     self.emptyLabel.stringValue = "Unable to load folder contents."
                 }
                 self.emptyLabel.isHidden = false
-            }
-        }
-    }
-
-    // MARK: - Folder Sizes
-
-    private func calculateVisibleFolderSizes() {
-        for (index, item) in items.enumerated() {
-            guard item.isDirectory && !item.isPackage else { continue }
-            FolderSizeService.shared.calculateSize(for: item.url) { [weak self] size in
-                guard let self = self else { return }
-                self.folderSizes[item.url] = size
-                // Update the size cell if the row is still valid
-                if index < self.items.count && self.items[index].url == item.url {
-                    let sizeColumnIndex = self.tableView.column(withIdentifier: self.sizeColumn)
-                    if sizeColumnIndex >= 0 {
-                        self.tableView.reloadData(
-                            forRowIndexes: IndexSet(integer: index),
-                            columnIndexes: IndexSet(integer: sizeColumnIndex)
-                        )
-                    }
-                }
             }
         }
     }
@@ -788,11 +765,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
             cell.textField?.stringValue = item.formattedDateModified
             cell.setAccessibilityLabel("Modified: \(item.formattedDateModified)")
         case sizeColumn:
-            if item.isDirectory && !item.isPackage, let cachedSize = folderSizes[item.url] {
-                cell.textField?.stringValue = ByteCountFormatter.string(fromByteCount: cachedSize, countStyle: .file)
-            } else {
-                cell.textField?.stringValue = item.formattedSize
-            }
+            cell.textField?.stringValue = item.formattedSize
             cell.setAccessibilityLabel("Size: \(cell.textField?.stringValue ?? item.formattedSize)")
         case kindColumn:
             cell.textField?.stringValue = item.kind
@@ -816,6 +789,9 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     func tableViewSelectionDidChange(_ notification: Notification) {
         delegate?.fileListDidSelect(items: selectedItems)
         updateStatusBar()
+        if let panel = QLPreviewPanel.shared(), panel.isVisible {
+            panel.reloadData()
+        }
     }
 
     // MARK: - Key handling
@@ -881,6 +857,19 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! {
         guard index < selectedItems.count else { return nil }
         return selectedItems[index].url as NSURL
+    }
+
+    func previewPanel(_ panel: QLPreviewPanel!, handle event: NSEvent!) -> Bool {
+        guard let event = event else { return false }
+        if event.type == .keyDown {
+            let keyCode = event.keyCode
+            // Arrow up (126) or arrow down (125)
+            if keyCode == 125 || keyCode == 126 {
+                tableView.keyDown(with: event)
+                return true
+            }
+        }
+        return false
     }
 }
 
@@ -988,6 +977,19 @@ extension FileListViewController: NSMenuDelegate {
         let tagsItem = NSMenuItem(title: "Tags", action: nil, keyEquivalent: "")
         tagsItem.submenu = tagsSubmenu
         menu.addItem(tagsItem)
+
+        // Compress / Extract
+        menu.addItem(.separator())
+        let selected = selectedItems
+        let allZips = selected.allSatisfy { $0.url.pathExtension.lowercased() == "zip" }
+        if allZips && !selected.isEmpty {
+            let extractItem = menu.addItem(withTitle: "Extract Here", action: #selector(contextExtract(_:)), keyEquivalent: "")
+            extractItem.target = self
+            let extractWithPwItem = menu.addItem(withTitle: "Extract with Password…", action: #selector(contextExtractWithPassword(_:)), keyEquivalent: "")
+            extractWithPwItem.target = self
+        }
+        let compressItem = menu.addItem(withTitle: "Compress…", action: #selector(contextCompress(_:)), keyEquivalent: "")
+        compressItem.target = self
 
         menu.addItem(.separator())
         menu.addItem(withTitle: "Reveal in Finder", action: #selector(contextGetInfo(_:)), keyEquivalent: "")
@@ -1220,6 +1222,124 @@ extension FileListViewController: NSMenuDelegate {
 
         // Reload to reflect tag changes
         reloadContents()
+    }
+
+    // MARK: - Compress / Extract
+
+    @objc private func contextCompress(_ sender: Any?) {
+        let selected = selectedItems
+        guard !selected.isEmpty else { return }
+        showCompressPanel(for: selected.map(\.url))
+    }
+
+    @objc private func contextExtract(_ sender: Any?) {
+        let selected = selectedItems
+        guard !selected.isEmpty else { return }
+        extractArchives(selected.map(\.url), password: nil)
+    }
+
+    @objc private func contextExtractWithPassword(_ sender: Any?) {
+        let selected = selectedItems
+        guard !selected.isEmpty else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Enter Password"
+        alert.informativeText = "Enter the password for the archive."
+        alert.addButton(withTitle: "Extract")
+        alert.addButton(withTitle: "Cancel")
+
+        let passwordField = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        passwordField.placeholderString = "Password"
+        alert.accessoryView = passwordField
+        alert.window.initialFirstResponder = passwordField
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let password = passwordField.stringValue
+        guard !password.isEmpty else { return }
+        extractArchives(selected.map(\.url), password: password)
+    }
+
+    private func extractArchives(_ urls: [URL], password: String?) {
+        for url in urls {
+            let destination = url.deletingLastPathComponent()
+            FileOperationService.shared.decompress(url, to: destination, password: password) { [weak self] result in
+                switch result {
+                case .success:
+                    self?.reloadContents()
+                case .failure(let error):
+                    self?.showError(error)
+                }
+            }
+        }
+    }
+
+    private func showCompressPanel(for urls: [URL]) {
+        guard let window = view.window else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "Compress"
+        alert.informativeText = urls.count == 1 ? "Compress \"\(urls[0].lastPathComponent)\"" : "Compress \(urls.count) items"
+        alert.addButton(withTitle: "Compress")
+        alert.addButton(withTitle: "Cancel")
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 80))
+
+        let levelLabel = NSTextField(labelWithString: "Compression:")
+        levelLabel.frame = NSRect(x: 0, y: 52, width: 90, height: 20)
+        container.addSubview(levelLabel)
+
+        let levelPopup = NSPopUpButton(frame: NSRect(x: 94, y: 48, width: 180, height: 28), pullsDown: false)
+        for level in FileOperationService.CompressionLevel.allCases {
+            levelPopup.addItem(withTitle: level.label)
+            levelPopup.lastItem?.tag = level.rawValue
+        }
+        levelPopup.selectItem(at: 2) // Normal
+        container.addSubview(levelPopup)
+
+        let passwordLabel = NSTextField(labelWithString: "Password:")
+        passwordLabel.frame = NSRect(x: 0, y: 16, width: 90, height: 20)
+        container.addSubview(passwordLabel)
+
+        let passwordField = NSSecureTextField(frame: NSRect(x: 94, y: 12, width: 180, height: 24))
+        passwordField.placeholderString = "Optional"
+        container.addSubview(passwordField)
+
+        alert.accessoryView = container
+
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+
+            let levelTag = levelPopup.selectedItem?.tag ?? 5
+            let level = FileOperationService.CompressionLevel(rawValue: levelTag) ?? .normal
+            let password = passwordField.stringValue.isEmpty ? nil : passwordField.stringValue
+
+            guard let self = self else { return }
+
+            // Build archive name
+            let archiveName: String
+            if urls.count == 1 {
+                archiveName = urls[0].deletingPathExtension().lastPathComponent + ".zip"
+            } else {
+                archiveName = "Archive.zip"
+            }
+
+            var archiveURL = self.currentURL.appendingPathComponent(archiveName)
+            var counter = 1
+            while FileManager.default.fileExists(atPath: archiveURL.path) {
+                let base = urls.count == 1 ? urls[0].deletingPathExtension().lastPathComponent : "Archive"
+                archiveURL = self.currentURL.appendingPathComponent("\(base) \(counter).zip")
+                counter += 1
+            }
+
+            FileOperationService.shared.compress(urls, to: archiveURL, level: level, password: password) { [weak self] result in
+                switch result {
+                case .success:
+                    self?.reloadContents()
+                case .failure(let error):
+                    self?.showError(error)
+                }
+            }
+        }
     }
 }
 

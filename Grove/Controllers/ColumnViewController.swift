@@ -265,7 +265,9 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
 
         let item = items[row]
         browserCell.stringValue = item.name
-        browserCell.image = ThumbnailCache.shared.icon(for: item.url)
+        browserCell.image = ThumbnailCache.shared.iconAsync(for: item.url) { [weak browser] icon in
+            browser?.reloadColumn(column)
+        }
         browserCell.isLeaf = !(item.isDirectory && !item.isPackage)
     }
 }

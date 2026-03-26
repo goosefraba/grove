@@ -170,6 +170,95 @@ final class FileOperationService {
         return destURL
     }
 
+    // MARK: - Compression
+
+    enum CompressionLevel: Int, CaseIterable {
+        case store = 0
+        case fast = 1
+        case normal = 5
+        case maximum = 9
+
+        var label: String {
+            switch self {
+            case .store: return "Store (no compression)"
+            case .fast: return "Fast"
+            case .normal: return "Normal"
+            case .maximum: return "Maximum"
+            }
+        }
+    }
+
+    func compress(_ urls: [URL], to archiveURL: URL, level: CompressionLevel = .normal, password: String? = nil, completion: @escaping (Result<URL, Error>) -> Void) {
+        backgroundQueue.async {
+            do {
+                let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+                defer { try? FileManager.default.removeItem(at: tempDir) }
+
+                // Stage files into temp directory so ditto archives them by name
+                for url in urls {
+                    let dest = tempDir.appendingPathComponent(url.lastPathComponent)
+                    try FileManager.default.copyItem(at: url, to: dest)
+                }
+
+                var args = ["-c", "-k"]
+                if let password = password, !password.isEmpty {
+                    args += ["--password", password]
+                }
+                args += ["--zlibCompressionLevel", "\(level.rawValue)"]
+                args += [tempDir.path, archiveURL.path]
+
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+                process.arguments = args
+                let errorPipe = Pipe()
+                process.standardError = errorPipe
+                try process.run()
+                process.waitUntilExit()
+
+                if process.terminationStatus != 0 {
+                    let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                    let message = String(data: errorData, encoding: .utf8) ?? "Compression failed"
+                    throw NSError(domain: "com.grove.compress", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: message])
+                }
+
+                DispatchQueue.main.async { completion(.success(archiveURL)) }
+            } catch {
+                DispatchQueue.main.async { completion(.failure(error)) }
+            }
+        }
+    }
+
+    func decompress(_ archiveURL: URL, to destinationDir: URL, password: String? = nil, completion: @escaping (Result<URL, Error>) -> Void) {
+        backgroundQueue.async {
+            do {
+                var args = ["-x", "-k"]
+                if let password = password, !password.isEmpty {
+                    args += ["--password", password]
+                }
+                args += [archiveURL.path, destinationDir.path]
+
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+                process.arguments = args
+                let errorPipe = Pipe()
+                process.standardError = errorPipe
+                try process.run()
+                process.waitUntilExit()
+
+                if process.terminationStatus != 0 {
+                    let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                    let message = String(data: errorData, encoding: .utf8) ?? "Decompression failed"
+                    throw NSError(domain: "com.grove.decompress", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: message])
+                }
+
+                DispatchQueue.main.async { completion(.success(destinationDir)) }
+            } catch {
+                DispatchQueue.main.async { completion(.failure(error)) }
+            }
+        }
+    }
+
     func openFile(_ url: URL) {
         NSWorkspace.shared.open(url)
     }

@@ -14,6 +14,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private let sections = SidebarSection.allCases
     private var items: [SidebarSection: [SidebarItem]] = [:]
 
+    private var suppressSelectionCallback = false
     private static let sidebarItemPasteboardType = NSPasteboard.PasteboardType("com.grove.sidebaritem")
 
     override func loadView() {
@@ -63,7 +64,6 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         outlineView.dataSource = self
         outlineView.delegate = self
         outlineView.rowSizeStyle = .default
-        outlineView.selectionHighlightStyle = .sourceList
         outlineView.style = .sourceList
         outlineView.floatsGroupRows = false
 
@@ -339,12 +339,15 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
+        guard !suppressSelectionCallback else { return }
         let row = outlineView.selectedRow
         guard row >= 0, let item = outlineView.item(atRow: row) as? SidebarItem else { return }
         delegate?.sidebarDidSelect(url: item.url)
     }
 
     func selectItem(for url: URL) {
+        suppressSelectionCallback = true
+        defer { suppressSelectionCallback = false }
         for section in sections {
             guard let sectionItems = items[section] else { continue }
             for sidebarItem in sectionItems {
@@ -353,6 +356,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                     if row >= 0 {
                         outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
                     }
+                    suppressSelectionCallback = false
                     return
                 }
             }

@@ -64,7 +64,8 @@ struct FileItem: Identifiable, Hashable {
         let keys: Set<URLResourceKey> = [
             .nameKey, .isDirectoryKey, .isPackageKey, .isHiddenKey,
             .fileSizeKey, .contentModificationDateKey, .creationDateKey,
-            .localizedTypeDescriptionKey, .contentTypeKey, .tagNamesKey
+            .localizedTypeDescriptionKey, .contentTypeKey, .tagNamesKey,
+            .fileSecurityKey
         ]
 
         guard let values = try? url.resourceValues(forKeys: keys) else {
@@ -72,9 +73,10 @@ struct FileItem: Identifiable, Hashable {
         }
 
         let perms: UInt16 = {
-            guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-                  let p = attrs[.posixPermissions] as? NSNumber else { return 0 }
-            return UInt16(p.intValue & 0o7777)
+            guard let security = values.fileSecurity else { return 0 }
+            var mode: mode_t = 0
+            guard CFFileSecurityGetMode(security as CFFileSecurity, &mode) else { return 0 }
+            return UInt16(mode & 0o7777)
         }()
 
         return FileItem(
