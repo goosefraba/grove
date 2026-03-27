@@ -63,6 +63,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         newWindow.makeKeyAndOrderFront(nil)
     }
 
+    @objc func closeCurrentWindow(_ sender: Any?) {
+        guard let window = NSApp.keyWindow else { return }
+        // Close all tabs in the window group, then the window itself
+        let tabbedWindows = window.tabbedWindows ?? [window]
+        for tab in tabbedWindows {
+            tab.close()
+        }
+    }
+
     @objc private func windowDidClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
         windowControllers.removeAll { $0.window === window }
@@ -227,8 +236,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let batchRenameItem = fileMenu.addItem(withTitle: "Batch Rename...", action: #selector(batchRenameFiles(_:)), keyEquivalent: "R")
         batchRenameItem.keyEquivalentModifierMask = [.command, .shift]
         fileMenu.addItem(.separator())
-        let closeItem = fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        let closeItem = fileMenu.addItem(withTitle: "Close Tab", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
         closeItem.keyEquivalentModifierMask = .command
+        let closeWindowItem = fileMenu.addItem(withTitle: "Close Window", action: #selector(closeCurrentWindow(_:)), keyEquivalent: "W")
+        closeWindowItem.keyEquivalentModifierMask = [.command, .shift]
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
 
@@ -298,6 +309,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
         windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(withTitle: "Show Tab Bar", action: #selector(NSWindow.toggleTabBar(_:)), keyEquivalent: "")
+        windowMenu.addItem(withTitle: "Show All Tabs", action: #selector(NSWindow.toggleTabOverview(_:)), keyEquivalent: "")
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(withTitle: "Show Next Tab", action: #selector(NSWindow.selectNextTab(_:)), keyEquivalent: "}")
+        windowMenu.addItem(withTitle: "Show Previous Tab", action: #selector(NSWindow.selectPreviousTab(_:)), keyEquivalent: "{")
+        windowMenu.addItem(withTitle: "Move Tab to New Window", action: #selector(NSWindow.moveTabToNewWindow(_:)), keyEquivalent: "")
+        windowMenu.addItem(withTitle: "Merge All Windows", action: #selector(NSWindow.mergeAllWindows(_:)), keyEquivalent: "")
         windowMenu.addItem(.separator())
         windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
         windowMenuItem.submenu = windowMenu

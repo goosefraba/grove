@@ -1,5 +1,9 @@
 import Foundation
 
+extension Notification.Name {
+    static let addToSidebarFavorites = Notification.Name("com.grove.addToSidebarFavorites")
+}
+
 enum SidebarSection: String, CaseIterable {
     case favorites = "Favorites"
     case locations = "Locations"

@@ -33,6 +33,9 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                        name: NSWorkspace.didMountNotification, object: nil)
         ws.addObserver(self, selector: #selector(volumesChanged(_:)),
                        name: NSWorkspace.didUnmountNotification, object: nil)
+
+        NotificationCenter.default.addObserver(self, selector: #selector(handleAddToFavorites(_:)),
+                                               name: .addToSidebarFavorites, object: nil)
     }
 
     private func setupAccessibility() {
@@ -365,6 +368,31 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     // MARK: - Context Menu Action
+
+    @objc private func handleAddToFavorites(_ notification: Notification) {
+        guard let url = notification.userInfo?["url"] as? URL else { return }
+
+        let allFavorites = items[.favorites] ?? []
+        guard !allFavorites.contains(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) else { return }
+
+        var customFavs = SidebarItem.customFavorites
+        guard !customFavs.contains(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) else { return }
+
+        let newItem = SidebarItem(
+            title: url.lastPathComponent,
+            url: url,
+            systemImage: "folder",
+            section: .favorites,
+            isBuiltIn: false
+        )
+        customFavs.append(newItem)
+        SidebarItem.saveCustomFavorites(customFavs)
+        reloadItems()
+        outlineView.reloadData()
+        for section in sections {
+            outlineView.expandItem(section)
+        }
+    }
 
     @objc private func removeFromSidebar(_ sender: Any) {
         let clickedRow = outlineView.clickedRow

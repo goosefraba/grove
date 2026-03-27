@@ -36,7 +36,9 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
         )
         window.minSize = NSSize(width: 600, height: 400)
         window.title = initialURL.displayName
+        window.tab.title = initialURL.displayName
         window.tabbingMode = .preferred
+        window.tabbingIdentifier = "com.grove.browser"
         window.titleVisibility = .visible
         window.toolbarStyle = .unified
         window.center()
@@ -87,6 +89,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
         splitVC.navigate(to: url)
         pathBar.update(for: url)
         window?.title = url.displayName
+        window?.tab.title = url.displayName
         updateNavigationButtons()
     }
 
@@ -253,7 +256,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
         splitVC.toggleInspector()
     }
 
-    @objc func newTab(_ sender: Any?) {
+    @objc override func newWindowForTab(_ sender: Any?) {
         guard let appDelegate = NSApp.delegate as? AppDelegate else { return }
         appDelegate.newTab(sender)
     }

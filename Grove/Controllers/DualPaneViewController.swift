@@ -79,10 +79,6 @@ final class DualPaneViewController: NSViewController {
 
         leftPane.delegate = self
         rightPane.delegate = self
-
-        // Register for drag-and-drop between panes
-        leftPane.view.registerForDraggedTypes([.fileURL])
-        rightPane.view.registerForDraggedTypes([.fileURL])
     }
 
     func loadDirectory(_ url: URL) {

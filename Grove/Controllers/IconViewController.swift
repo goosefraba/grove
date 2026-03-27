@@ -251,22 +251,54 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
     }
 
     func collectionView(_ collectionView: NSCollectionView, validateDrop draggingInfo: any NSDraggingInfo, proposedIndexPath proposedDropIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>, dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>) -> NSDragOperation {
+        let index = proposedDropIndexPath.pointee.item
+
+        // If dropping on a specific item, only accept if it's a navigable directory
+        if proposedDropOperation.pointee == .on {
+            if index < items.count && items[index].isDirectory && !items[index].isPackage {
+                return draggingInfo.draggingSourceOperationMask.contains(.move) ? .move : .copy
+            }
+            // Re-target to the whole collection (drop into current directory)
+            proposedDropOperation.pointee = .before
+            return draggingInfo.draggingSourceOperationMask.contains(.move) ? .move : .copy
+        }
+
         return draggingInfo.draggingSourceOperationMask.contains(.move) ? .move : .copy
     }
 
     func collectionView(_ collectionView: NSCollectionView, acceptDrop draggingInfo: any NSDraggingInfo, indexPath: IndexPath, dropOperation: NSCollectionView.DropOperation) -> Bool {
         guard let urls = draggingInfo.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
               !urls.isEmpty else { return false }
+
+        let destination: URL
+        if dropOperation == .on && indexPath.item < items.count && items[indexPath.item].isDirectory {
+            destination = items[indexPath.item].url
+        } else {
+            destination = currentURL
+        }
+
         do {
             if draggingInfo.draggingSourceOperationMask.contains(.move) {
-                try FileOperationService.shared.move(urls, to: currentURL)
+                try FileOperationService.shared.move(urls, to: destination)
             } else {
-                try FileOperationService.shared.copy(urls, to: currentURL)
+                try FileOperationService.shared.copy(urls, to: destination)
             }
+            reloadContents()
             return true
         } catch {
+            showError(error)
             return false
         }
+    }
+
+    private func showError(_ error: Error) {
+        guard let window = view.window else {
+            let alert = NSAlert(error: error)
+            alert.runModal()
+            return
+        }
+        let alert = NSAlert(error: error)
+        alert.beginSheetModal(for: window, completionHandler: nil)
     }
 }
 

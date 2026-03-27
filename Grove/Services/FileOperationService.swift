@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import CommonCrypto
 
 final class FileOperationService {
 
@@ -253,6 +254,39 @@ final class FileOperationService {
                 }
 
                 DispatchQueue.main.async { completion(.success(destinationDir)) }
+            } catch {
+                DispatchQueue.main.async { completion(.failure(error)) }
+            }
+        }
+    }
+
+    // MARK: - Checksum
+
+    enum ChecksumAlgorithm {
+        case md5
+        case sha256
+    }
+
+    func computeChecksum(for url: URL, algorithm: ChecksumAlgorithm, completion: @escaping (Result<String, Error>) -> Void) {
+        backgroundQueue.async {
+            do {
+                let data = try Data(contentsOf: url)
+                let hex: String
+                switch algorithm {
+                case .md5:
+                    var digest = [UInt8](repeating: 0, count: Int(CC_MD5_DIGEST_LENGTH))
+                    data.withUnsafeBytes { buffer in
+                        _ = CC_MD5(buffer.baseAddress, CC_LONG(data.count), &digest)
+                    }
+                    hex = digest.map { String(format: "%02x", $0) }.joined()
+                case .sha256:
+                    var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+                    data.withUnsafeBytes { buffer in
+                        _ = CC_SHA256(buffer.baseAddress, CC_LONG(data.count), &digest)
+                    }
+                    hex = digest.map { String(format: "%02x", $0) }.joined()
+                }
+                DispatchQueue.main.async { completion(.success(hex)) }
             } catch {
                 DispatchQueue.main.async { completion(.failure(error)) }
             }

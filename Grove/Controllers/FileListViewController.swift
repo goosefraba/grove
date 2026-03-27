@@ -27,6 +27,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     private(set) var currentURL: URL = FileManager.default.homeDirectoryForCurrentUser
     var showHiddenFiles: Bool = false
     private var isShowingSearchResults: Bool = false
+    private var isRestoringSortPreference: Bool = false
 
     var filterText: String = "" {
         didSet {
@@ -277,6 +278,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         searchScopeLabel.isHidden = true
         SearchService.shared.stop()
 
+        loadSortPreference(for: url)
+
         watcher?.stop()
         watcher = DirectoryWatcher(url: url) { [weak self] in
             self?.scheduleReload()
@@ -357,6 +360,75 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
                 result = a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
             }
             return sortAscending ? result : !result
+        }
+    }
+
+    // MARK: - Sort Persistence
+
+    private static let sortPreferencesKey = "directorySortPreferences"
+    private static let maxSortPreferences = 200
+
+    private func saveSortPreference() {
+        let defaults = UserDefaults.standard
+        var prefs = defaults.dictionary(forKey: Self.sortPreferencesKey) as? [String: [String: Any]] ?? [:]
+        let path = currentURL.path
+        prefs[path] = [
+            "sortKey": sortKey,
+            "sortAscending": sortAscending,
+            "lastAccessed": Date().timeIntervalSince1970,
+        ]
+        if prefs.count > Self.maxSortPreferences {
+            let sorted = prefs.sorted { lhs, rhs in
+                let lTime = lhs.value["lastAccessed"] as? TimeInterval ?? 0
+                let rTime = rhs.value["lastAccessed"] as? TimeInterval ?? 0
+                return lTime < rTime
+            }
+            let toRemove = prefs.count - Self.maxSortPreferences
+            for (key, _) in sorted.prefix(toRemove) {
+                prefs.removeValue(forKey: key)
+            }
+        }
+        defaults.set(prefs, forKey: Self.sortPreferencesKey)
+    }
+
+    private func loadSortPreference(for url: URL) {
+        let defaults = UserDefaults.standard
+        guard let prefs = defaults.dictionary(forKey: Self.sortPreferencesKey) as? [String: [String: Any]],
+              let entry = prefs[url.path],
+              let key = entry["sortKey"] as? String,
+              let ascending = entry["sortAscending"] as? Bool else {
+            sortKey = "name"
+            sortAscending = true
+            applySortDescriptorToTableView()
+            return
+        }
+        sortKey = key
+        sortAscending = ascending
+        applySortDescriptorToTableView()
+
+        // Update lastAccessed timestamp
+        var updatedPrefs = prefs
+        var updatedEntry = entry
+        updatedEntry["lastAccessed"] = Date().timeIntervalSince1970
+        updatedPrefs[url.path] = updatedEntry
+        defaults.set(updatedPrefs, forKey: Self.sortPreferencesKey)
+    }
+
+    private func applySortDescriptorToTableView() {
+        guard let column = tableView.tableColumns.first(where: { $0.sortDescriptorPrototype?.key == sortKey }),
+              let prototype = column.sortDescriptorPrototype else { return }
+        let descriptor = NSSortDescriptor(key: prototype.key, ascending: sortAscending, selector: prototype.selector)
+        isRestoringSortPreference = true
+        tableView.sortDescriptors = [descriptor]
+        isRestoringSortPreference = false
+
+        for col in tableView.tableColumns {
+            tableView.setIndicatorImage(nil, in: col)
+        }
+        tableView.highlightedTableColumn = column
+        let indicatorName = sortAscending ? "NSAscendingSortIndicator" : "NSDescendingSortIndicator"
+        if let indicator = NSImage(named: NSImage.Name(indicatorName)) {
+            tableView.setIndicatorImage(indicator, in: column)
         }
     }
 
@@ -644,9 +716,11 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     }
 
     func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
+        guard !isRestoringSortPreference else { return }
         guard let descriptor = tableView.sortDescriptors.first, let key = descriptor.key else { return }
         sortKey = key
         sortAscending = descriptor.ascending
+        saveSortPreference()
         sortItems()
         tableView.reloadData()
 
@@ -978,9 +1052,28 @@ extension FileListViewController: NSMenuDelegate {
         tagsItem.submenu = tagsSubmenu
         menu.addItem(tagsItem)
 
+        // Calculate Size (folders only)
+        let selected = selectedItems
+        let allDirectories = selected.allSatisfy { $0.isDirectory && !$0.isPackage }
+        if allDirectories && !selected.isEmpty {
+            let calcSizeItem = menu.addItem(withTitle: "Calculate Size", action: #selector(contextCalculateSize(_:)), keyEquivalent: "")
+            calcSizeItem.target = self
+        }
+
+        // Checksum submenu (single file only, not directory)
+        if selected.count == 1, let singleItem = selected.first, !singleItem.isDirectory {
+            let checksumSubmenu = NSMenu()
+            let md5Item = checksumSubmenu.addItem(withTitle: "Copy MD5", action: #selector(contextCopyMD5(_:)), keyEquivalent: "")
+            md5Item.target = self
+            let sha256Item = checksumSubmenu.addItem(withTitle: "Copy SHA-256", action: #selector(contextCopySHA256(_:)), keyEquivalent: "")
+            sha256Item.target = self
+            let checksumMenuItem = NSMenuItem(title: "Checksum", action: nil, keyEquivalent: "")
+            checksumMenuItem.submenu = checksumSubmenu
+            menu.addItem(checksumMenuItem)
+        }
+
         // Compress / Extract
         menu.addItem(.separator())
-        let selected = selectedItems
         let allZips = selected.allSatisfy { $0.url.pathExtension.lowercased() == "zip" }
         if allZips && !selected.isEmpty {
             let extractItem = menu.addItem(withTitle: "Extract Here", action: #selector(contextExtract(_:)), keyEquivalent: "")
@@ -1005,6 +1098,15 @@ extension FileListViewController: NSMenuDelegate {
             }
         }
         menu.addItem(terminalItem)
+
+        // Add to Favorites (directories only)
+        if let clickedItem = clickedRow < items.count ? items[clickedRow] : nil,
+           clickedItem.isDirectory && !clickedItem.isPackage {
+            menu.addItem(.separator())
+            let favItem = NSMenuItem(title: "Add to Favorites", action: #selector(contextAddToFavorites(_:)), keyEquivalent: "")
+            favItem.target = self
+            menu.addItem(favItem)
+        }
 
         for item in menu.items where item.target == nil && item.action != nil && item.submenu == nil {
             item.target = self
@@ -1143,6 +1245,81 @@ extension FileListViewController: NSMenuDelegate {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(paths.joined(separator: "\n"), forType: .string)
+    }
+
+    // MARK: - Calculate Size
+
+    @objc private func contextCalculateSize(_ sender: Any?) {
+        let folders = selectedItems.filter { $0.isDirectory && !$0.isPackage }
+        guard !folders.isEmpty else { return }
+
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+
+        let group = DispatchGroup()
+        var results: [(String, Int64)] = []
+
+        for folder in folders {
+            group.enter()
+            FolderSizeService.shared.calculateSize(for: folder.url) { size in
+                results.append((folder.name, size))
+                group.leave()
+            }
+        }
+
+        group.notify(queue: .main) { [weak self] in
+            let alert = NSAlert()
+            alert.alertStyle = .informational
+            if results.count == 1 {
+                let (name, size) = results[0]
+                alert.messageText = "Folder Size"
+                alert.informativeText = "\(name): \(formatter.string(fromByteCount: size))"
+            } else {
+                alert.messageText = "Folder Sizes"
+                let lines = results.map { "\($0.0): \(formatter.string(fromByteCount: $0.1))" }
+                alert.informativeText = lines.joined(separator: "\n")
+            }
+            alert.addButton(withTitle: "OK")
+            if let window = self?.view.window {
+                alert.beginSheetModal(for: window, completionHandler: nil)
+            } else {
+                alert.runModal()
+            }
+        }
+    }
+
+    // MARK: - Checksum
+
+    @objc private func contextCopyMD5(_ sender: Any?) {
+        copyChecksum(algorithm: .md5)
+    }
+
+    @objc private func contextCopySHA256(_ sender: Any?) {
+        copyChecksum(algorithm: .sha256)
+    }
+
+    private func copyChecksum(algorithm: FileOperationService.ChecksumAlgorithm) {
+        guard let item = selectedItems.first, !item.isDirectory else { return }
+        FileOperationService.shared.computeChecksum(for: item.url, algorithm: algorithm) { [weak self] result in
+            switch result {
+            case .success(let hash):
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString(hash, forType: .string)
+            case .failure(let error):
+                self?.showError(error)
+            }
+        }
+    }
+
+    // MARK: - Add to Favorites
+
+    @objc private func contextAddToFavorites(_ sender: Any?) {
+        let row = tableView.clickedRow
+        guard row >= 0, row < items.count else { return }
+        let item = items[row]
+        guard item.isDirectory && !item.isPackage else { return }
+        NotificationCenter.default.post(name: .addToSidebarFavorites, object: nil, userInfo: ["url": item.url])
     }
 
     // MARK: - Open in Terminal
