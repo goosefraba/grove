@@ -1,49 +1,74 @@
 # Grove
 
-A native macOS file browser — fast, minimal, keyboard-driven.
+Grove is a native macOS file browser built with Swift and AppKit.
 
-## Features
+It aims to feel fast, direct, and keyboard-friendly rather than acting as a Finder clone or a cross-platform shell wrapped for macOS.
 
-- **Tabbed browsing** — native macOS window tabs (Cmd+T)
-- **Three-pane layout** — sidebar, file list, inspector
-- **Full keyboard navigation** — all standard Finder shortcuts
-- **Quick Look** — spacebar preview
-- **Drag & drop** — copy/move files between folders and apps
-- **Context menus** — right-click on files or empty space
-- **Directory watching** — auto-refreshes when files change
-- **Volume tracking** — sidebar updates on mount/unmount
+## What It Does
+
+- Browse files with native macOS windows and tabs
+- Navigate with list, column, icon, and gallery views
+- Use an optional preview pane and dual-pane layout
+- Work with favorites, mounted volumes, breadcrumbs, and Go to Folder
+- Filter the current folder and run deeper search from list view
+- Copy, move, duplicate, rename, batch rename, compress, and extract files
+- Use Quick Look, drag and drop, context menus, and standard keyboard shortcuts
+- Restore workspace state across launches
 
 ## Requirements
 
-- macOS 14.0+
-- Xcode 15+ (for building)
+- macOS 14.0 or newer
+- Xcode 15 or newer
 
-## Run
+## Build And Run
+
+From the repository root:
 
 ```bash
 ./run.sh
 ```
 
-Builds the project and launches the app.
+That builds Grove into repo-local `.derivedData` and launches the resulting app bundle.
 
-## Keyboard Shortcuts
+## Install Locally
 
-| Shortcut | Action |
-|----------|--------|
-| Cmd+T | New tab |
-| Cmd+N | New window |
-| Cmd+Shift+N | New folder |
-| Cmd+C / Cmd+X / Cmd+V | Copy / Cut / Paste |
-| Cmd+Delete | Move to Trash |
-| Cmd+O / Cmd+Down | Open |
-| Cmd+Up | Enclosing folder |
-| Cmd+[ / Cmd+] | Back / Forward |
-| Space | Quick Look |
-| Enter | Rename |
-| Cmd+Shift+. | Toggle hidden files |
-| Cmd+Option+I | Toggle inspector |
-| Cmd+A | Select all |
+To build and install Grove as a local macOS app:
+
+```bash
+./install.sh
+```
+
+By default this installs to `~/Applications/Grove.app`.
+
+To install into `/Applications` instead:
+
+```bash
+INSTALL_DIR=/Applications ./install.sh
+```
+
+## Manual Build
+
+```bash
+xcodebuild -project Grove.xcodeproj -scheme Grove -configuration Debug -derivedDataPath .derivedData build
+open .derivedData/Build/Products/Debug/Grove.app
+```
+
+## Project Structure
+
+- `Grove/App`: app entry point and application lifecycle
+- `Grove/Controllers`: AppKit window and view controllers
+- `Grove/Views`: SwiftUI and AppKit view components
+- `Grove/Models`: shared view and navigation models
+- `Grove/Services`: file operations, search, watchers, thumbnails, and helpers
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, workflow, and pull request expectations.
+
+## Distribution
+
+Grove is currently set up for direct distribution and source builds. A notarized release pipeline is not included yet.
 
 ## License
 
-Private.
+Grove is available under the MIT License. See [LICENSE](LICENSE).
