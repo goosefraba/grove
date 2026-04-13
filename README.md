@@ -61,6 +61,12 @@ open .derivedData/Build/Products/Debug/Grove.app
 - `Grove/Models`: shared view and navigation models
 - `Grove/Services`: file operations, search, watchers, thumbnails, and helpers
 
+## Project Tracking
+
+- Roadmap: [BACKLOG.md](BACKLOG.md)
+- Changelog: [CHANGELOG.md](CHANGELOG.md)
+- Release process: [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, workflow, and pull request expectations.

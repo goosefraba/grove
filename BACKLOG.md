@@ -1,59 +1,52 @@
-# Grove — Feature Backlog
+# Grove Roadmap
 
-## Performance
+This file tracks the current public roadmap for Grove.
 
-- [ ] Async directory loading — move `contentsOfDirectory` off main thread to avoid UI freeze on large dirs
-- [ ] Async icon loading — fetch icons in background with placeholder, update cells on completion
-- [ ] File operation progress — show progress indicator for long copy/move operations with cancel support
+It is intentionally lightweight: shipped capabilities are documented here for orientation, and the open sections focus on what still needs attention rather than preserving old implementation history.
 
-## File Operations
+## Current State
 
-- [ ] Undo/Redo — register undo actions for trash, move, rename, copy
-- [ ] Duplicate (Cmd+D) — duplicate selected files in place
-- [ ] Batch rename — regex/pattern-based renaming of multiple files
-- [ ] Folder size calculation — background computation of actual folder sizes
+Grove already includes:
 
-## Views
+- Native macOS windows and tabs
+- Sidebar favorites and mounted locations
+- List, column, icon, and gallery views
+- Optional preview pane and dual-pane browsing
+- Breadcrumb navigation and Go to Folder
+- Toolbar filtering and deep search where supported
+- Copy, move, duplicate, rename, batch rename, compress, and extract actions
+- Quick Look integration
+- Drag and drop
+- Window state restoration
+- Finder tag display and general accessibility coverage
 
-- [ ] Column view (NSBrowser) — Finder's Miller columns mode
-- [ ] Icon view (NSCollectionView) — grid view with large thumbnails
-- [ ] Gallery view — image preview mode with large preview and filmstrip
-- [ ] Preview pane — inline file preview (text, images, markdown) without Quick Look
-- [ ] Dual pane mode — side-by-side directories for easy copy/move
+## Next Up
 
-## Search
+- Search parity across all views
+  Make filtering and deeper search behavior feel consistent in list, icon, column, gallery, and dual-pane modes.
 
-- [ ] Filename filter — toolbar search field filtering current directory by name
-- [ ] Spotlight integration — deep search via NSMetadataQuery
+- Inspector and preview depth
+  Expand metadata coverage, improve multi-selection summaries, and make previews more useful for common file types.
 
-## Context Menu
+- File operation polish
+  Tighten edge cases around long-running operations, cancellation, undo behavior, and conflict handling.
 
-- [ ] Open With submenu — app picker for opening files
-- [ ] Copy Path — copy file path to clipboard
-- [ ] Open in Terminal — open Terminal.app at current directory
+- View-mode refinement
+  Continue aligning column, icon, gallery, and dual-pane behaviors so selection, keyboard navigation, and refresh logic feel equally mature.
 
-## Sidebar
+- Packaging and distribution
+  Improve release packaging, app installation ergonomics, and public documentation for direct macOS distribution.
 
-- [ ] Drag to add favorites — drop folders onto sidebar to bookmark them
-- [ ] Remove/reorder favorites — right-click to remove, drag to reorder
-- [ ] Persist favorites — save custom favorites to UserDefaults
+## Good First Issues
 
-## Inspector
+- Documentation fixes that improve setup or explain behavior more clearly
+- Small UX inconsistencies between view modes
+- Keyboard shortcut regressions or discoverability gaps
+- Accessibility labeling improvements
+- Error-message clarity for file operation failures
 
-- [ ] Multi-selection summary — show aggregate info (count, total size) for multiple selected files
-- [ ] Permissions display — show rwx/octal permissions
-- [ ] Image dimensions — show width/height for image files
+## Out Of Scope For Now
 
-## Navigation
-
-- [ ] Go to Folder (Cmd+Shift+G) — type a path to navigate directly
-- [ ] Breadcrumb dropdowns — click path bar segments to browse sibling directories
-
-## Window Management
-
-- [ ] Window state restoration — reopen windows at last browsed location after quit
-
-## System Integration
-
-- [ ] Finder tags — read/write macOS color tags
-- [ ] Accessibility — VoiceOver labels and identifiers on all custom views
+- Mac App Store packaging
+- Cross-platform ports
+- Automatic CI builds that require paid macOS runners
