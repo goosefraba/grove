@@ -43,6 +43,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
     private var watcher: DirectoryWatcher?
     private var reloadWorkItem: DispatchWorkItem?
+    private var spinnerWorkItem: DispatchWorkItem?
     private var clipboard: (urls: [URL], isCut: Bool)?
     private var editingRow: Int = -1
     private var pendingSelectionURL: URL?
@@ -297,32 +298,56 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         loadSortPreference(for: url)
 
         watcher?.stop()
-        watcher = DirectoryWatcher(url: url) { [weak self] in
-            self?.scheduleReload()
+        watcher = DirectoryWatcher(url: url) { [weak self] eventURLs in
+            self?.scheduleReload(for: eventURLs)
         }
 
-        reloadContents()
+        let shouldShowLoadingIndicator = allItems.isEmpty
+        reloadContents(showLoadingIndicator: shouldShowLoadingIndicator)
     }
 
-    private func scheduleReload() {
+    private func scheduleReload(for eventURLs: [URL]) {
+        guard shouldReload(for: eventURLs) else { return }
         reloadWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            self?.reloadContents()
+            self?.reloadContents(showLoadingIndicator: false)
         }
         reloadWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
     }
 
-    private func reloadContents() {
+    private func shouldReload(for eventURLs: [URL]) -> Bool {
+        guard !eventURLs.isEmpty else { return true }
+        guard !showHiddenFiles else { return true }
+
+        return eventURLs.contains { eventURL in
+            let relativeComponents = Array(eventURL.standardizedFileURL.pathComponents.dropFirst(currentURL.standardizedFileURL.pathComponents.count))
+            return !relativeComponents.contains(where: { $0.hasPrefix(".") })
+        }
+    }
+
+    private func reloadContents(showLoadingIndicator: Bool = false) {
         guard !isShowingSearchResults else { return }
         let selectedURLs = Set(selectedItems.map(\.url))
 
-        loadingSpinner.isHidden = false
-        loadingSpinner.startAnimation(nil)
+        spinnerWorkItem?.cancel()
+        loadingSpinner.stopAnimation(nil)
+        loadingSpinner.isHidden = true
         emptyLabel.isHidden = true
+
+        if showLoadingIndicator {
+            let work = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                self.loadingSpinner.isHidden = false
+                self.loadingSpinner.startAnimation(nil)
+            }
+            spinnerWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+        }
 
         FileOperationService.shared.contentsOfDirectoryAsync(at: currentURL, showHidden: showHiddenFiles) { [weak self] result in
             guard let self = self else { return }
+            self.spinnerWorkItem?.cancel()
             self.loadingSpinner.stopAnimation(nil)
             self.loadingSpinner.isHidden = true
 

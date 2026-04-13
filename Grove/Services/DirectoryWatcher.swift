@@ -2,7 +2,7 @@ import Foundation
 import CoreServices
 
 final class DirectoryWatcher {
-    typealias Callback = () -> Void
+    typealias Callback = ([URL]) -> Void
 
     private var stream: FSEventStreamRef?
     private let callback: Callback
@@ -37,11 +37,36 @@ final class DirectoryWatcher {
 
         guard let stream = FSEventStreamCreate(
             nil,
-            { _, info, _, _, _, _ in
+            { _, info, numEvents, eventPathsPointer, eventFlags, _ in
                 guard let info = info else { return }
                 let box = Unmanaged<DirectoryWatcher.WatcherBox>.fromOpaque(info).takeUnretainedValue()
+
+                let shouldReload = (0 ..< Int(numEvents)).contains { index in
+                    let flags = eventFlags[index]
+                    let rescanFlags = UInt32(
+                        kFSEventStreamEventFlagMustScanSubDirs |
+                        kFSEventStreamEventFlagKernelDropped |
+                        kFSEventStreamEventFlagUserDropped |
+                        kFSEventStreamEventFlagRootChanged
+                    )
+                    let contentFlags = UInt32(
+                        kFSEventStreamEventFlagItemCreated |
+                        kFSEventStreamEventFlagItemRemoved |
+                        kFSEventStreamEventFlagItemRenamed |
+                        kFSEventStreamEventFlagItemModified |
+                        kFSEventStreamEventFlagItemFinderInfoMod |
+                        kFSEventStreamEventFlagItemXattrMod
+                    )
+                    return (flags & rescanFlags) != 0 || (flags & contentFlags) != 0
+                }
+
+                guard shouldReload else { return }
+
+                let eventPaths = (unsafeBitCast(eventPathsPointer, to: NSArray.self) as? [String] ?? []).map {
+                    URL(fileURLWithPath: $0)
+                }
                 DispatchQueue.main.async {
-                    box.watcher?.callback()
+                    box.watcher?.callback(eventPaths)
                 }
             },
             &context,

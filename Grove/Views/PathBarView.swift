@@ -57,8 +57,8 @@ final class PathBarView: NSView {
             button.setAccessibilityLabel("Path component: \(component.path)")
             button.setAccessibilityIdentifier("pathBarComponent_\(index)")
 
-            // Enable right-click/click-hold for dropdown
-            button.sendAction(on: [.leftMouseDown])
+            // Navigate on normal click; reserve alternate click for sibling menu.
+            button.sendAction(on: [.leftMouseUp, .rightMouseDown])
 
             buttons.append(button)
             stackView.addArrangedSubview(button)
@@ -74,11 +74,18 @@ final class PathBarView: NSView {
             return
         }
 
-        // Show sibling dropdown on click
-        showSiblingMenu(for: clickedURL, relativeTo: sender, event: event)
+        let shouldShowSiblingMenu =
+            event.type == .rightMouseDown ||
+            event.modifierFlags.contains(.control)
+
+        if shouldShowSiblingMenu {
+            showSiblingMenu(for: clickedURL, relativeTo: sender)
+        } else {
+            onPathComponentClicked?(clickedURL)
+        }
     }
 
-    private func showSiblingMenu(for url: URL, relativeTo button: NSButton, event: NSEvent) {
+    private func showSiblingMenu(for url: URL, relativeTo button: NSButton) {
         let parentURL = url.deletingLastPathComponent()
 
         // Build menu with sibling directories

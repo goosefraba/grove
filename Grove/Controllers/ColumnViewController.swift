@@ -86,7 +86,7 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
         columnPaths.removeAll()
 
         watcher?.stop()
-        watcher = DirectoryWatcher(url: url) { [weak self] in
+        watcher = DirectoryWatcher(url: url) { [weak self] _ in
             self?.scheduleReload()
         }
 
