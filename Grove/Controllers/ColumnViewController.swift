@@ -112,8 +112,7 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
     }
 
     private func pathHierarchy(for url: URL) -> [URL] {
-        // Return just the target URL as column 0
-        return [url]
+        url.pathComponents_
     }
 
     private func loadItems(at url: URL) -> [FileItem] {
@@ -152,10 +151,7 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
         reloadWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
-            // Reload column 0
-            self.columnItems[0] = self.loadItems(at: self.currentURL)
-            self.browser.reloadColumn(0)
-            self.updateStatusBar()
+            self.loadDirectory(self.currentURL)
         }
         reloadWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
@@ -176,7 +172,7 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
     }
 
     private func updateStatusBar() {
-        let items = columnItems[0] ?? []
+        let items = columnItems[currentColumnIndex] ?? []
         let count = items.count
         let selectedCount = selectedItems.count
         let itemText = count == 1 ? "1 item" : "\(count) items"
@@ -184,6 +180,10 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
         let diskSpace = FileOperationService.shared.availableDiskSpace(at: currentURL) ?? ""
         let spaceText = diskSpace.isEmpty ? "" : "  —  \(diskSpace) available"
         statusBar.stringValue = "\(itemText)\(selectionText)\(spaceText)"
+    }
+
+    private var currentColumnIndex: Int {
+        columnPaths.first(where: { $0.value.standardizedFileURL == currentURL.standardizedFileURL })?.key ?? 0
     }
 
     // MARK: - Actions
