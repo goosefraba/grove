@@ -90,6 +90,31 @@ final class MainSplitViewController: NSSplitViewController {
         !previewPaneItem.isCollapsed
     }
 
+    func setPreviewPaneVisible(_ visible: Bool) {
+        previewPaneItem.isCollapsed = !visible
+    }
+
+    var isDualPaneVisible: Bool {
+        isDualPaneActive
+    }
+
+    var showsHiddenFiles: Bool {
+        if isDualPaneActive {
+            return dualPaneVC?.leftPane.showHiddenFiles ?? false
+        }
+        return currentContentVC?.showHiddenFiles ?? false
+    }
+
+    func setShowsHiddenFiles(_ visible: Bool) {
+        guard showsHiddenFiles != visible else { return }
+        toggleHiddenFiles()
+    }
+
+    func setDualPaneVisible(_ visible: Bool) {
+        guard isDualPaneActive != visible else { return }
+        toggleDualPane()
+    }
+
     // MARK: - View Mode Switching
 
     func switchViewMode(_ mode: ViewMode) {

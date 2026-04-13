@@ -127,6 +127,10 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
     func saveState() -> [String: Any] {
         var state: [String: Any] = [:]
         state["currentURL"] = currentURL.path
+        state["viewMode"] = splitVC.currentViewMode.rawValue
+        state["previewPaneVisible"] = splitVC.isPreviewPaneVisible
+        state["dualPaneVisible"] = splitVC.isDualPaneVisible
+        state["showsHiddenFiles"] = splitVC.showsHiddenFiles
         if let frame = window?.frame {
             state["windowFrame"] = NSStringFromRect(frame)
         }
@@ -163,6 +167,23 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
 
         if let inspectorCollapsed = dict["inspectorCollapsed"] as? Bool, !inspectorCollapsed {
             wc.splitVC.setInspectorCollapsed(false)
+        }
+
+        if let viewModeRaw = dict["viewMode"] as? Int,
+           let viewMode = ViewMode(rawValue: viewModeRaw) {
+            wc.splitVC.switchViewMode(viewMode)
+        }
+
+        if let dualPaneVisible = dict["dualPaneVisible"] as? Bool {
+            wc.splitVC.setDualPaneVisible(dualPaneVisible)
+        }
+
+        if let previewPaneVisible = dict["previewPaneVisible"] as? Bool {
+            wc.splitVC.setPreviewPaneVisible(previewPaneVisible)
+        }
+
+        if let showsHiddenFiles = dict["showsHiddenFiles"] as? Bool {
+            wc.splitVC.setShowsHiddenFiles(showsHiddenFiles)
         }
 
         return wc
