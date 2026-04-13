@@ -98,17 +98,26 @@ struct SidebarItem: Hashable {
         let volumesURL = URL(fileURLWithPath: "/Volumes")
         guard let contents = try? FileManager.default.contentsOfDirectory(
             at: volumesURL,
-            includingPropertiesForKeys: [.volumeNameKey],
-            options: []
+            includingPropertiesForKeys: [.isHiddenKey, .volumeNameKey],
+            options: [.skipsHiddenFiles]
         ) else {
             return []
         }
 
+        var seenCanonicalPaths = Set<String>()
+
         return contents.compactMap { url in
-            let name = (try? url.resourceValues(forKeys: [.volumeNameKey]))?.volumeName ?? url.lastPathComponent
+            let canonicalURL = url.resolvingSymlinksInPath().standardizedFileURL
+            guard seenCanonicalPaths.insert(canonicalURL.path).inserted else { return nil }
+
+            let name =
+                (try? url.resourceValues(forKeys: [.volumeNameKey]))?.volumeName ??
+                (try? canonicalURL.resourceValues(forKeys: [.volumeNameKey]))?.volumeName ??
+                url.lastPathComponent
+
             return SidebarItem(
                 title: name,
-                url: url,
+                url: canonicalURL,
                 systemImage: "externaldrive",
                 section: .locations
             )
