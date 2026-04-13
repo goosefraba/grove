@@ -11,6 +11,7 @@ final class DualPaneViewController: NSViewController {
     private let rightContainer = NSView()
 
     weak var navigationDelegate: MainSplitViewControllerDelegate?
+    weak var selectionDelegate: FileListViewControllerDelegate?
 
     override init(nibName nibNameOrNil: NSNib.Name?, bundle nibBundleOrNil: Bundle?) {
         activePane = leftPane
@@ -87,9 +88,14 @@ final class DualPaneViewController: NSViewController {
     }
 
     func switchActivePane() {
-        activePane = (activePane === leftPane) ? rightPane : leftPane
-        updateActivePaneHighlight()
+        setActivePane((activePane === leftPane) ? rightPane : leftPane)
         view.window?.makeFirstResponder(activePane.view)
+    }
+
+    private func setActivePane(_ pane: FileListViewController) {
+        guard activePane !== pane else { return }
+        activePane = pane
+        updateActivePaneHighlight()
     }
 
     private func updateActivePaneHighlight() {
@@ -124,6 +130,11 @@ extension DualPaneViewController: FileListViewControllerDelegate {
     }
 
     func fileListDidSelect(items: [FileItem]) {
-        // Forward selection to parent for inspector update
+        if leftPane.selectedItems == items, rightPane.selectedItems != items {
+            setActivePane(leftPane)
+        } else if rightPane.selectedItems == items, leftPane.selectedItems != items {
+            setActivePane(rightPane)
+        }
+        selectionDelegate?.fileListDidSelect(items: items)
     }
 }

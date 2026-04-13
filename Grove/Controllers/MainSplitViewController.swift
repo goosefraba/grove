@@ -158,6 +158,7 @@ final class MainSplitViewController: NSSplitViewController {
 
         let dual = DualPaneViewController()
         dual.navigationDelegate = navigationDelegate
+        dual.selectionDelegate = self
         dualPaneVC = dual
 
         let dualItem = NSSplitViewItem(viewController: dual)
@@ -217,8 +218,6 @@ extension MainSplitViewController: FileListViewControllerDelegate {
 
     func fileListDidSelect(items: [FileItem]) {
         inspectorVC.updateSelection(items)
-        if let item = items.first {
-            previewPaneVC.updateSelection(item)
-        }
+        previewPaneVC.updateSelection(items.first)
     }
 }
