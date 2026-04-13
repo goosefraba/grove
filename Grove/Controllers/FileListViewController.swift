@@ -43,6 +43,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     private var reloadWorkItem: DispatchWorkItem?
     private var clipboard: (urls: [URL], isCut: Bool)?
     private var editingRow: Int = -1
+    private var pendingSelectionURL: URL?
+    private var pendingRenameURL: URL?
 
     // Column identifiers
     private let nameColumn = NSUserInterfaceItemIdentifier("NameColumn")
@@ -314,11 +316,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
             case .success(let loadedItems):
                 self.allItems = loadedItems
                 self.applyFilter()
-                // Restore selection
-                let newSelection = IndexSet(self.items.indices.filter { selectedURLs.contains(self.items[$0].url) })
-                if !newSelection.isEmpty {
-                    self.tableView.selectRowIndexes(newSelection, byExtendingSelection: false)
-                }
+                self.restoreSelection(previouslySelectedURLs: selectedURLs)
                 if self.items.isEmpty && self.filterText.isEmpty {
                     self.emptyLabel.stringValue = "This folder is empty"
                     self.emptyLabel.isHidden = false
@@ -337,6 +335,46 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
                 self.emptyLabel.isHidden = false
             }
         }
+    }
+
+    private func restoreSelection(previouslySelectedURLs: Set<URL>) {
+        let requestedSelection = pendingSelectionURL.map { Set([$0]) } ?? previouslySelectedURLs
+        let newSelection = IndexSet(items.indices.filter { requestedSelection.contains(items[$0].url) })
+
+        if !newSelection.isEmpty {
+            tableView.selectRowIndexes(newSelection, byExtendingSelection: false)
+        } else {
+            tableView.deselectAll(nil)
+        }
+
+        if let pendingRenameURL, selectItem(at: pendingRenameURL, startRenaming: true) {
+            self.pendingRenameURL = nil
+        }
+
+        if pendingSelectionURL != nil, !newSelection.isEmpty {
+            pendingSelectionURL = nil
+        }
+    }
+
+    @discardableResult
+    private func selectItem(at url: URL, startRenaming: Bool = false) -> Bool {
+        guard let index = items.firstIndex(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) else {
+            return false
+        }
+
+        tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+        tableView.scrollRowToVisible(index)
+
+        guard startRenaming else { return true }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.tableView.layoutSubtreeIfNeeded()
+            self.tableView.scrollRowToVisible(index)
+            self.startRenaming(at: index)
+        }
+
+        return true
     }
 
     private func sortItems() {
@@ -577,13 +615,9 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     func createNewFolder() {
         do {
             let folderURL = try FileOperationService.shared.createNewFolder(in: currentURL)
+            pendingSelectionURL = folderURL
+            pendingRenameURL = folderURL
             reloadContents()
-            // Select and start renaming the new folder
-            if let index = items.firstIndex(where: { $0.url == folderURL }) {
-                tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
-                tableView.scrollRowToVisible(index)
-                startRenaming(at: index)
-            }
         } catch {
             showError(error)
         }
