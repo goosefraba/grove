@@ -279,9 +279,9 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
 
         do {
             if draggingInfo.draggingSourceOperationMask.contains(.move) {
-                try FileOperationService.shared.move(urls, to: destination)
+                _ = try FileOperationService.shared.move(urls, to: destination)
             } else {
-                try FileOperationService.shared.copy(urls, to: destination)
+                _ = try FileOperationService.shared.copy(urls, to: destination)
             }
             reloadContents()
             return true

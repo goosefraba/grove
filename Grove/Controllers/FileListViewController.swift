@@ -538,23 +538,22 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 do {
                     if isCut {
-                        try FileOperationService.shared.moveWithProgress(urls, to: destination, progress: { value, name in
+                        let movedURLs = try FileOperationService.shared.moveWithProgress(urls, to: destination, progress: { value, name in
                             DispatchQueue.main.async {
                                 progressVC.updateProgress(value, fileName: name)
                             }
                         }, cancelled: { progressVC.isCancelled })
                         DispatchQueue.main.async {
                             self?.clipboard = nil
-                            self?.registerUndoMove(originalURLs: urls, destination: destination)
+                            self?.registerUndoMove(originalURLs: urls, movedURLs: movedURLs)
                         }
                     } else {
-                        try FileOperationService.shared.copyWithProgress(urls, to: destination, progress: { value, name in
+                        let copiedURLs = try FileOperationService.shared.copyWithProgress(urls, to: destination, progress: { value, name in
                             DispatchQueue.main.async {
                                 progressVC.updateProgress(value, fileName: name)
                             }
                         }, cancelled: { progressVC.isCancelled })
                         DispatchQueue.main.async {
-                            let copiedURLs = urls.map { destination.appendingPathComponent($0.lastPathComponent) }
                             self?.registerUndoCopy(copiedURLs: copiedURLs)
                         }
                     }
@@ -573,12 +572,11 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         } else {
             do {
                 if isCut {
-                    try FileOperationService.shared.move(urls, to: destination)
+                    let movedURLs = try FileOperationService.shared.move(urls, to: destination)
                     clipboard = nil
-                    registerUndoMove(originalURLs: urls, destination: destination)
+                    registerUndoMove(originalURLs: urls, movedURLs: movedURLs)
                 } else {
-                    try FileOperationService.shared.copy(urls, to: destination)
-                    let copiedURLs = urls.map { destination.appendingPathComponent($0.lastPathComponent) }
+                    let copiedURLs = try FileOperationService.shared.copy(urls, to: destination)
                     registerUndoCopy(copiedURLs: copiedURLs)
                 }
             } catch {
@@ -683,7 +681,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
             do {
                 for (original, trashURL) in zip(originalURLs, trashURLs) {
                     let destination = original.deletingLastPathComponent()
-                    try FileOperationService.shared.move([trashURL], to: destination)
+                    _ = try FileOperationService.shared.move([trashURL], to: destination)
                 }
             } catch {
                 target.showError(error)
@@ -692,14 +690,13 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         undoManager.setActionName("Move to Trash")
     }
 
-    private func registerUndoMove(originalURLs: [URL], destination: URL) {
+    private func registerUndoMove(originalURLs: [URL], movedURLs: [URL]) {
         guard let undoManager = fileUndoManager else { return }
         undoManager.registerUndo(withTarget: self) { target in
             do {
-                let movedURLs = originalURLs.map { destination.appendingPathComponent($0.lastPathComponent) }
                 for (movedURL, original) in zip(movedURLs, originalURLs) {
                     let originalDir = original.deletingLastPathComponent()
-                    try FileOperationService.shared.move([movedURL], to: originalDir)
+                    _ = try FileOperationService.shared.move([movedURL], to: originalDir)
                 }
             } catch {
                 target.showError(error)
@@ -792,9 +789,9 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         let destination = (dropOperation == .on && row < items.count && items[row].isDirectory) ? items[row].url : currentURL
         do {
             if info.draggingSourceOperationMask.contains(.move) {
-                try FileOperationService.shared.move(urls, to: destination)
+                _ = try FileOperationService.shared.move(urls, to: destination)
             } else {
-                try FileOperationService.shared.copy(urls, to: destination)
+                _ = try FileOperationService.shared.copy(urls, to: destination)
             }
             return true
         } catch {

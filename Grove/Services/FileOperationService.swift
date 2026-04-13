@@ -76,18 +76,24 @@ final class FileOperationService {
         return resultURLs
     }
 
-    func copy(_ urls: [URL], to destination: URL) throws {
+    func copy(_ urls: [URL], to destination: URL) throws -> [URL] {
+        var copiedURLs: [URL] = []
         for url in urls {
             let destURL = uniqueDestination(for: url, in: destination)
             try fileManager.copyItem(at: url, to: destURL)
+            copiedURLs.append(destURL)
         }
+        return copiedURLs
     }
 
-    func move(_ urls: [URL], to destination: URL) throws {
+    func move(_ urls: [URL], to destination: URL) throws -> [URL] {
+        var movedURLs: [URL] = []
         for url in urls {
             let destURL = uniqueDestination(for: url, in: destination)
             try fileManager.moveItem(at: url, to: destURL)
+            movedURLs.append(destURL)
         }
+        return movedURLs
     }
 
     func rename(_ url: URL, to newName: String) throws -> URL {
@@ -136,24 +142,30 @@ final class FileOperationService {
 
     // MARK: - Progress Operations
 
-    func copyWithProgress(_ urls: [URL], to destination: URL, progress: @escaping (Double, String) -> Void, cancelled: @escaping () -> Bool) throws {
+    func copyWithProgress(_ urls: [URL], to destination: URL, progress: @escaping (Double, String) -> Void, cancelled: @escaping () -> Bool) throws -> [URL] {
+        var copiedURLs: [URL] = []
         for (index, url) in urls.enumerated() {
-            if cancelled() { return }
+            if cancelled() { return copiedURLs }
             let destURL = uniqueDestination(for: url, in: destination)
             progress(Double(index) / Double(urls.count), url.lastPathComponent)
             try fileManager.copyItem(at: url, to: destURL)
+            copiedURLs.append(destURL)
         }
         progress(1.0, "")
+        return copiedURLs
     }
 
-    func moveWithProgress(_ urls: [URL], to destination: URL, progress: @escaping (Double, String) -> Void, cancelled: @escaping () -> Bool) throws {
+    func moveWithProgress(_ urls: [URL], to destination: URL, progress: @escaping (Double, String) -> Void, cancelled: @escaping () -> Bool) throws -> [URL] {
+        var movedURLs: [URL] = []
         for (index, url) in urls.enumerated() {
-            if cancelled() { return }
+            if cancelled() { return movedURLs }
             let destURL = uniqueDestination(for: url, in: destination)
             progress(Double(index) / Double(urls.count), url.lastPathComponent)
             try fileManager.moveItem(at: url, to: destURL)
+            movedURLs.append(destURL)
         }
         progress(1.0, "")
+        return movedURLs
     }
 
     // MARK: - Helpers
