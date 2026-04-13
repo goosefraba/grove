@@ -77,6 +77,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
         searchField.delegate = self
         searchField.sendsWholeSearchString = false
         searchField.sendsSearchStringImmediately = true
+        updateSearchFieldAvailability()
     }
 
     // MARK: - Navigation
@@ -86,11 +87,13 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
             history.navigateTo(url)
         }
         searchField.stringValue = ""
+        splitVC.clearToolbarSearch()
         splitVC.navigate(to: url)
         pathBar.update(for: url)
         window?.title = url.displayName
         window?.tab.title = url.displayName
         updateNavigationButtons()
+        updateSearchFieldAvailability()
     }
 
     @objc func goBack(_ sender: Any?) {
@@ -106,6 +109,17 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
     private func updateNavigationButtons() {
         backButton?.isEnabled = history.canGoBack
         forwardButton?.isEnabled = history.canGoForward
+    }
+
+    private func updateSearchFieldAvailability() {
+        let supportsToolbarSearch = splitVC.supportsToolbarSearch
+        searchField.isEnabled = supportsToolbarSearch
+        searchField.placeholderString = supportsToolbarSearch ? "Filter" : "Search unavailable in this view"
+
+        if !supportsToolbarSearch, !searchField.stringValue.isEmpty {
+            searchField.stringValue = ""
+            splitVC.clearToolbarSearch()
+        }
     }
 
     // MARK: - Go to Folder
@@ -286,25 +300,27 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
 
     func controlTextDidChange(_ obj: Notification) {
         guard let field = obj.object as? NSSearchField, field === searchField else { return }
+        guard splitVC.supportsToolbarSearch else { return }
         let text = field.stringValue
         if text.isEmpty {
-            splitVC.fileListVC.clearSearch()
+            splitVC.clearToolbarSearch()
         } else {
-            splitVC.fileListVC.filterText = text
+            splitVC.setToolbarFilterText(text)
         }
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard splitVC.supportsToolbarSearch else { return false }
         if commandSelector == #selector(NSResponder.insertNewline(_:)) {
             let query = searchField.stringValue
             if !query.isEmpty {
-                splitVC.fileListVC.performSpotlightSearch(query)
+                splitVC.performToolbarSearch(query)
             }
             return true
         }
         if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
             searchField.stringValue = ""
-            splitVC.fileListVC.clearSearch()
+            splitVC.clearToolbarSearch()
             window?.makeFirstResponder(nil)
             return true
         }
@@ -315,5 +331,9 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
 extension BrowserWindowController: MainSplitViewControllerDelegate {
     func splitViewDidNavigate(to url: URL) {
         navigate(to: url, addToHistory: true)
+    }
+
+    func splitViewSearchSupportDidChange() {
+        updateSearchFieldAvailability()
     }
 }

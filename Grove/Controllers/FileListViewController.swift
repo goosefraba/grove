@@ -35,6 +35,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         }
     }
 
+    var supportsToolbarSearch: Bool { true }
+
     private var fileUndoManager: UndoManager? {
         view.window?.undoManager
     }
@@ -206,6 +208,18 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     }
 
     // MARK: - Search & Filter
+
+    func setToolbarFilterText(_ text: String) {
+        filterText = text
+    }
+
+    func performToolbarSearch(_ query: String) {
+        performSpotlightSearch(query)
+    }
+
+    func clearToolbarSearch() {
+        clearSearch()
+    }
 
     func applyFilter() {
         if filterText.isEmpty {

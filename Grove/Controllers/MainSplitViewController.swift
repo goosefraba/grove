@@ -2,6 +2,7 @@ import AppKit
 
 protocol MainSplitViewControllerDelegate: AnyObject {
     func splitViewDidNavigate(to url: URL)
+    func splitViewSearchSupportDidChange()
 }
 
 final class MainSplitViewController: NSSplitViewController {
@@ -115,6 +116,23 @@ final class MainSplitViewController: NSSplitViewController {
         toggleDualPane()
     }
 
+    var supportsToolbarSearch: Bool {
+        !isDualPaneActive && (currentContentVC?.supportsToolbarSearch ?? false)
+    }
+
+    func setToolbarFilterText(_ text: String) {
+        currentContentVC?.setToolbarFilterText(text)
+    }
+
+    func performToolbarSearch(_ query: String) {
+        currentContentVC?.performToolbarSearch(query)
+    }
+
+    func clearToolbarSearch() {
+        fileListVC.clearToolbarSearch()
+        currentContentVC?.clearToolbarSearch()
+    }
+
     // MARK: - View Mode Switching
 
     func switchViewMode(_ mode: ViewMode) {
@@ -164,6 +182,7 @@ final class MainSplitViewController: NSSplitViewController {
         currentViewMode = mode
 
         newVC.loadDirectory(currentURL)
+        navigationDelegate?.splitViewSearchSupportDidChange()
     }
 
     // MARK: - Dual Pane
@@ -194,6 +213,7 @@ final class MainSplitViewController: NSSplitViewController {
 
         dual.loadDirectory(currentURL)
         isDualPaneActive = true
+        navigationDelegate?.splitViewSearchSupportDidChange()
     }
 
     private func deactivateDualPane() {
@@ -216,6 +236,7 @@ final class MainSplitViewController: NSSplitViewController {
         vc.loadDirectory(currentURL)
         isDualPaneActive = false
         currentViewMode = .list
+        navigationDelegate?.splitViewSearchSupportDidChange()
     }
 
     // MARK: - Hidden Files Toggle forwarding
