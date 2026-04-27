@@ -171,6 +171,14 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
         }
     }
 
+    private func renameSelectedFile() {
+        guard selectedItems.count == 1, let item = selectedItems.first else { return }
+        FileRenameHelper.presentRenameSheet(for: item, from: self) { [weak self] _ in
+            guard let self = self else { return }
+            self.loadDirectory(self.currentURL)
+        }
+    }
+
     private func updateStatusBar() {
         let items = columnItems[currentColumnIndex] ?? []
         let count = items.count
@@ -225,6 +233,15 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
         } else {
             FileOperationService.shared.openFile(item.url)
         }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 36, event.modifierFlags.contains(.control) {
+            renameSelectedFile()
+            return
+        }
+
+        super.keyDown(with: event)
     }
 
     // MARK: - NSBrowserDelegate

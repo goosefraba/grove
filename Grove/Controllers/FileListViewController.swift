@@ -2,6 +2,34 @@ import AppKit
 import QuickLookUI
 import UniformTypeIdentifiers
 
+private final class FileListTableView: NSTableView {
+    var onRenameShortcut: (() -> Void)?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.isRenameShortcut {
+            onRenameShortcut?()
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.isRenameShortcut {
+            onRenameShortcut?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+}
+
+private extension NSEvent {
+    var isRenameShortcut: Bool {
+        let isReturnOrEnter = keyCode == 36 || keyCode == 76
+        let modifiers = modifierFlags.intersection(.deviceIndependentFlagsMask)
+        return isReturnOrEnter && modifiers.contains(.control) && !modifiers.contains(.command)
+    }
+}
+
 protocol FileListViewControllerDelegate: AnyObject {
     func fileListDidNavigate(to url: URL)
     func fileListDidSelect(items: [FileItem])
@@ -14,7 +42,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     weak var delegate: FileListViewControllerDelegate?
 
     private let scrollView = NSScrollView()
-    private let tableView = NSTableView()
+    private let tableView = FileListTableView()
     private let statusBar = NSTextField(labelWithString: "")
     private let emptyLabel = NSTextField(labelWithString: "Empty Folder")
     private let searchScopeLabel = NSTextField(labelWithString: "")
@@ -108,6 +136,9 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         tableView.style = .fullWidth
         tableView.doubleAction = #selector(tableViewDoubleClicked(_:))
         tableView.target = self
+        tableView.onRenameShortcut = { [weak self] in
+            self?.renameSelectedRow()
+        }
 
         tableView.registerForDraggedTypes([.fileURL])
         tableView.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
@@ -328,6 +359,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
     private func reloadContents(showLoadingIndicator: Bool = false) {
         guard !isShowingSearchResults else { return }
+        let requestURL = currentURL.standardizedFileURL
+        let requestShowHiddenFiles = showHiddenFiles
         let selectedURLs = Set(selectedItems.map(\.url))
 
         spinnerWorkItem?.cancel()
@@ -347,6 +380,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
         FileOperationService.shared.contentsOfDirectoryAsync(at: currentURL, showHidden: showHiddenFiles) { [weak self] result in
             guard let self = self else { return }
+            guard self.currentURL.standardizedFileURL == requestURL,
+                  self.showHiddenFiles == requestShowHiddenFiles else { return }
             self.spinnerWorkItem?.cancel()
             self.loadingSpinner.stopAnimation(nil)
             self.loadingSpinner.isHidden = true
@@ -569,7 +604,9 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         let destination = currentURL
 
         // Use progress sheet for operations with more than 3 files
-        if urls.count > 3, let window = view.window {
+        if urls.count > 3,
+           !FileOperationService.shared.hasNameConflicts(urls, in: destination),
+           let window = view.window {
             let progressVC = FileProgressViewController()
 
             presentAsSheet(progressVC)
@@ -610,13 +647,12 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
             }
         } else {
             do {
+                let resultURLs = try transferFiles(urls, to: destination, isMove: isCut)
                 if isCut {
-                    let movedURLs = try FileOperationService.shared.move(urls, to: destination)
                     clipboard = nil
-                    registerUndoMove(originalURLs: urls, movedURLs: movedURLs)
+                    registerUndoMove(originalURLs: urls, movedURLs: resultURLs)
                 } else {
-                    let copiedURLs = try FileOperationService.shared.copy(urls, to: destination)
-                    registerUndoCopy(copiedURLs: copiedURLs)
+                    registerUndoCopy(copiedURLs: resultURLs)
                 }
             } catch {
                 showError(error)
@@ -680,6 +716,19 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         textField.delegate = self
         textField.selectText(nil)
         view.window?.makeFirstResponder(textField)
+        selectEditableTitlePortion(for: items[row], in: textField)
+    }
+
+    private func selectEditableTitlePortion(for item: FileItem, in textField: NSTextField) {
+        guard let fieldEditor = view.window?.fieldEditor(true, for: textField) else { return }
+        fieldEditor.selectedRange = FileRenameHelper.defaultSelectionRange(for: item)
+    }
+
+    private func renameSelectedRow() {
+        let row = tableView.selectedRow
+        if row >= 0 {
+            startRenaming(at: row)
+        }
     }
 
     func toggleHiddenFiles() {
@@ -827,11 +876,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
               !urls.isEmpty else { return false }
         let destination = (dropOperation == .on && row < items.count && items[row].isDirectory) ? items[row].url : currentURL
         do {
-            if info.draggingSourceOperationMask.contains(.move) {
-                _ = try FileOperationService.shared.move(urls, to: destination)
-            } else {
-                _ = try FileOperationService.shared.copy(urls, to: destination)
-            }
+            let isMove = info.draggingSourceOperationMask.contains(.move)
+            _ = try transferFiles(urls, to: destination, isMove: isMove)
             return true
         } catch {
             showError(error)
@@ -957,11 +1003,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         }
 
         switch event.keyCode {
-        case 36: // Enter — rename
-            let row = tableView.selectedRow
-            if row >= 0 {
-                startRenaming(at: row)
-            }
+        case 36: // Enter / Ctrl+Enter — rename
+            renameSelectedRow()
         case 49: // Space — Quick Look
             toggleQuickLook()
         default:
@@ -1405,7 +1448,12 @@ extension FileListViewController: NSMenuDelegate {
         let escapedPath = targetURL.path
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
-        let script = "tell application \"Terminal\"\nactivate\ndo script \"cd \\\"\\(escapedPath)\\\"\"\nend tell"
+        let script = """
+        tell application "Terminal"
+        activate
+        do script "cd \"\(escapedPath)\""
+        end tell
+        """
 
         if let appleScript = NSAppleScript(source: script) {
             var error: NSDictionary?
@@ -1508,14 +1556,26 @@ extension FileListViewController: NSMenuDelegate {
 
     private func extractArchives(_ urls: [URL], password: String?) {
         for url in urls {
-            let destination = url.deletingLastPathComponent()
-            FileOperationService.shared.decompress(url, to: destination, password: password) { [weak self] result in
+            FileOperationService.shared.decompressToUniqueFolder(url, password: password) { [weak self] result in
                 switch result {
                 case .success:
                     self?.reloadContents()
                 case .failure(let error):
                     self?.showError(error)
                 }
+            }
+        }
+    }
+
+    private func transferFiles(_ urls: [URL], to destination: URL, isMove: Bool) throws -> [URL] {
+        let conflictPrompt = FileConflictResolutionPrompt(window: view.window)
+        if isMove {
+            return try FileOperationService.shared.moveResolvingConflicts(urls, to: destination) { conflict in
+                conflictPrompt.resolve(conflict)
+            }
+        } else {
+            return try FileOperationService.shared.copyResolvingConflicts(urls, to: destination) { conflict in
+                conflictPrompt.resolve(conflict)
             }
         }
     }

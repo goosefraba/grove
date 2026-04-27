@@ -10,6 +10,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
 
     private var backButton: NSToolbarItem?
     private var forwardButton: NSToolbarItem?
+    private var hiddenFilesButton: NSButton?
 
     var currentURL: URL { history.currentURL }
 
@@ -18,6 +19,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
     private let backForwardID = NSToolbarItem.Identifier("BackForward")
     private let pathBarID = NSToolbarItem.Identifier("PathBar")
     private let searchID = NSToolbarItem.Identifier("Search")
+    private let hiddenFilesID = NSToolbarItem.Identifier("HiddenFiles")
     private let inspectorID = NSToolbarItem.Identifier("Inspector")
 
     convenience init() {
@@ -47,6 +49,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
 
         window.contentViewController = splitVC
         splitVC.navigationDelegate = self
+        splitVC.loadViewIfNeeded()
 
         setupToolbar()
         setupPathBar()
@@ -197,7 +200,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
         }
 
         if let showsHiddenFiles = dict["showsHiddenFiles"] as? Bool {
-            wc.splitVC.setShowsHiddenFiles(showsHiddenFiles)
+            wc.setShowsHiddenFiles(showsHiddenFiles)
         }
 
         return wc
@@ -256,6 +259,28 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
             item.preferredWidthForSearchField = 180
             return item
 
+        case hiddenFilesID:
+            let item = NSToolbarItem(itemIdentifier: hiddenFilesID)
+            let button = NSButton(image: NSImage(systemSymbolName: "eye.slash", accessibilityDescription: "Hidden Files") ?? NSImage(), target: self, action: #selector(toggleHiddenFiles(_:)))
+            button.setButtonType(.toggle)
+            button.bezelStyle = .texturedRounded
+            button.imagePosition = .imageOnly
+            button.toolTip = "Show hidden files"
+            button.setAccessibilityLabel("Show hidden files")
+            button.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                button.widthAnchor.constraint(equalToConstant: 28),
+                button.heightAnchor.constraint(equalToConstant: 28)
+            ])
+
+            item.view = button
+            item.label = "Hidden Files"
+            item.paletteLabel = "Show Hidden Files"
+            item.toolTip = "Show hidden files"
+            hiddenFilesButton = button
+            updateHiddenFilesButtonState()
+            return item
+
         case inspectorID:
             let item = NSToolbarItem(itemIdentifier: inspectorID)
             item.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: "Inspector")
@@ -277,6 +302,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
             pathBarID,
             .flexibleSpace,
             searchID,
+            hiddenFilesID,
             inspectorID,
         ]
     }
@@ -289,6 +315,26 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
 
     @objc func toggleInspector(_ sender: Any?) {
         splitVC.toggleInspector()
+    }
+
+    @objc func toggleHiddenFiles(_ sender: Any?) {
+        splitVC.toggleHiddenFiles()
+        updateHiddenFilesButtonState()
+    }
+
+    func setShowsHiddenFiles(_ visible: Bool) {
+        splitVC.setShowsHiddenFiles(visible)
+        updateHiddenFilesButtonState()
+    }
+
+    private func updateHiddenFilesButtonState() {
+        let showsHidden = splitVC.showsHiddenFiles
+        hiddenFilesButton?.state = showsHidden ? .on : .off
+        hiddenFilesButton?.image = NSImage(
+            systemSymbolName: showsHidden ? "eye" : "eye.slash",
+            accessibilityDescription: showsHidden ? "Hide Hidden Files" : "Show Hidden Files"
+        )
+        hiddenFilesButton?.toolTip = showsHidden ? "Hide hidden files" : "Show hidden files"
     }
 
     @objc override func newWindowForTab(_ sender: Any?) {

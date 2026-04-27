@@ -1,6 +1,6 @@
 import AppKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     private var windowControllers: [BrowserWindowController] = []
 
@@ -156,7 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func toggleHiddenFiles(_ sender: Any?) {
-        currentSplitVC?.toggleHiddenFiles()
+        currentBrowserController?.toggleHiddenFiles(sender)
     }
 
     @objc func toggleInspector(_ sender: Any?) {
@@ -187,6 +187,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func toggleDualPane(_ sender: Any?) {
         currentSplitVC?.toggleDualPane()
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(toggleHiddenFiles(_:)):
+            let showsHiddenFiles = currentSplitVC?.showsHiddenFiles ?? false
+            menuItem.state = showsHiddenFiles ? .on : .off
+            menuItem.title = showsHiddenFiles ? "Hide Hidden Files" : "Show Hidden Files"
+            return currentSplitVC != nil
+        default:
+            return true
+        }
     }
 
     private var currentBrowserController: BrowserWindowController? {

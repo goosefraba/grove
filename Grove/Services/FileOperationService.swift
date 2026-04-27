@@ -4,6 +4,24 @@ import CommonCrypto
 
 final class FileOperationService {
 
+    enum ConflictResolution {
+        case skip
+        case keepBoth
+        case replace
+        case merge
+    }
+
+    struct FileConflict {
+        let sourceURL: URL
+        let destinationURL: URL
+        let canMerge: Bool
+    }
+
+    private enum TransferOperation {
+        case copy
+        case move
+    }
+
     static let shared = FileOperationService()
     private let fileManager = FileManager.default
     private let backgroundQueue = DispatchQueue(label: "com.grove.fileops", qos: .userInitiated, attributes: .concurrent)
@@ -96,6 +114,22 @@ final class FileOperationService {
         return movedURLs
     }
 
+    func copyResolvingConflicts(
+        _ urls: [URL],
+        to destination: URL,
+        resolver: (FileConflict) -> ConflictResolution
+    ) throws -> [URL] {
+        try transfer(urls, to: destination, operation: .copy, resolver: resolver)
+    }
+
+    func moveResolvingConflicts(
+        _ urls: [URL],
+        to destination: URL,
+        resolver: (FileConflict) -> ConflictResolution
+    ) throws -> [URL] {
+        try transfer(urls, to: destination, operation: .move, resolver: resolver)
+    }
+
     func rename(_ url: URL, to newName: String) throws -> URL {
         let newURL = url.deletingLastPathComponent().appendingPathComponent(newName)
         try fileManager.moveItem(at: url, to: newURL)
@@ -170,6 +204,117 @@ final class FileOperationService {
 
     // MARK: - Helpers
 
+    func hasNameConflicts(_ urls: [URL], in directory: URL) -> Bool {
+        urls.contains { url in
+            let destinationURL = directory.appendingPathComponent(url.lastPathComponent)
+            return fileManager.fileExists(atPath: destinationURL.path)
+        }
+    }
+
+    private func transfer(
+        _ urls: [URL],
+        to destination: URL,
+        operation: TransferOperation,
+        resolver: (FileConflict) -> ConflictResolution
+    ) throws -> [URL] {
+        var resultURLs: [URL] = []
+
+        for url in urls {
+            if let resultURL = try transfer(url, to: destination, operation: operation, resolver: resolver) {
+                resultURLs.append(resultURL)
+            }
+        }
+
+        return resultURLs
+    }
+
+    private func transfer(
+        _ url: URL,
+        to directory: URL,
+        operation: TransferOperation,
+        resolver: (FileConflict) -> ConflictResolution
+    ) throws -> URL? {
+        let destinationURL = directory.appendingPathComponent(url.lastPathComponent)
+
+        guard fileManager.fileExists(atPath: destinationURL.path) else {
+            try performTransfer(url, to: destinationURL, operation: operation)
+            return destinationURL
+        }
+
+        guard url.standardizedFileURL != destinationURL.standardizedFileURL else {
+            return nil
+        }
+
+        let conflict = FileConflict(
+            sourceURL: url,
+            destinationURL: destinationURL,
+            canMerge: canMergeDirectories(sourceURL: url, destinationURL: destinationURL)
+        )
+
+        switch resolver(conflict) {
+        case .skip:
+            return nil
+        case .keepBoth:
+            let uniqueURL = uniqueDestination(for: url, in: directory)
+            try performTransfer(url, to: uniqueURL, operation: operation)
+            return uniqueURL
+        case .replace:
+            try fileManager.removeItem(at: destinationURL)
+            try performTransfer(url, to: destinationURL, operation: operation)
+            return destinationURL
+        case .merge:
+            guard conflict.canMerge else {
+                let uniqueURL = uniqueDestination(for: url, in: directory)
+                try performTransfer(url, to: uniqueURL, operation: operation)
+                return uniqueURL
+            }
+            try mergeDirectory(sourceURL: url, into: destinationURL, operation: operation, resolver: resolver)
+            return destinationURL
+        }
+    }
+
+    private func performTransfer(_ sourceURL: URL, to destinationURL: URL, operation: TransferOperation) throws {
+        switch operation {
+        case .copy:
+            try fileManager.copyItem(at: sourceURL, to: destinationURL)
+        case .move:
+            try fileManager.moveItem(at: sourceURL, to: destinationURL)
+        }
+    }
+
+    private func mergeDirectory(
+        sourceURL: URL,
+        into destinationURL: URL,
+        operation: TransferOperation,
+        resolver: (FileConflict) -> ConflictResolution
+    ) throws {
+        let childURLs = try fileManager.contentsOfDirectory(
+            at: sourceURL,
+            includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey],
+            options: []
+        )
+
+        for childURL in childURLs {
+            _ = try transfer(childURL, to: destinationURL, operation: operation, resolver: resolver)
+        }
+
+        if operation == .move,
+           (try? fileManager.contentsOfDirectory(atPath: sourceURL.path).isEmpty) == true {
+            try fileManager.removeItem(at: sourceURL)
+        }
+    }
+
+    private func canMergeDirectories(sourceURL: URL, destinationURL: URL) -> Bool {
+        isPlainDirectory(sourceURL) && isPlainDirectory(destinationURL)
+    }
+
+    private func isPlainDirectory(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey]) else {
+            return false
+        }
+        return values.isDirectory == true && values.isPackage != true
+    }
+
     private func uniqueDestination(for url: URL, in directory: URL) -> URL {
         let name = url.deletingPathExtension().lastPathComponent
         let ext = url.pathExtension
@@ -181,6 +326,62 @@ final class FileOperationService {
             counter += 1
         }
         return destURL
+    }
+
+    private func archiveExtractionFolderName(for archiveURL: URL) -> String {
+        let filename = archiveURL.lastPathComponent
+        let lowercasedFilename = filename.lowercased()
+        let archiveExtensions = [
+            ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst",
+            ".tgz", ".tbz2", ".txz", ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar"
+        ]
+
+        for archiveExtension in archiveExtensions where lowercasedFilename.hasSuffix(archiveExtension) {
+            let endIndex = filename.index(filename.endIndex, offsetBy: -archiveExtension.count)
+            let baseName = String(filename[..<endIndex])
+            return baseName.isEmpty ? archiveURL.deletingPathExtension().lastPathComponent : baseName
+        }
+
+        return archiveURL.deletingPathExtension().lastPathComponent
+    }
+
+    private func createUniqueDirectory(named name: String, in directory: URL) throws -> URL {
+        let baseName = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Archive" : name
+        var counter = 0
+
+        while true {
+            let folderName = counter == 0 ? baseName : "\(baseName) \(counter)"
+            let folderURL = directory.appendingPathComponent(folderName, isDirectory: true)
+
+            do {
+                try fileManager.createDirectory(at: folderURL, withIntermediateDirectories: false)
+                return folderURL
+            } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileWriteFileExistsError {
+                counter += 1
+            }
+        }
+    }
+
+    private func extractArchive(_ archiveURL: URL, to destinationDir: URL, password: String?) throws {
+        var args = ["-x", "-k"]
+        if let password = password, !password.isEmpty {
+            args += ["--password", password]
+        }
+        args += [archiveURL.path, destinationDir.path]
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        process.arguments = args
+        let errorPipe = Pipe()
+        process.standardError = errorPipe
+        try process.run()
+        process.waitUntilExit()
+
+        if process.terminationStatus != 0 {
+            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let message = String(data: errorData, encoding: .utf8) ?? "Decompression failed"
+            throw NSError(domain: "com.grove.decompress", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: message])
+        }
     }
 
     // MARK: - Compression
@@ -242,28 +443,32 @@ final class FileOperationService {
         }
     }
 
+    func decompressToUniqueFolder(_ archiveURL: URL, password: String? = nil, completion: @escaping (Result<URL, Error>) -> Void) {
+        backgroundQueue.async {
+            var destinationDir: URL?
+
+            do {
+                let parentDir = archiveURL.deletingLastPathComponent()
+                let folderName = self.archiveExtractionFolderName(for: archiveURL)
+                let createdDir = try self.createUniqueDirectory(named: folderName, in: parentDir)
+                destinationDir = createdDir
+
+                try self.extractArchive(archiveURL, to: createdDir, password: password)
+
+                DispatchQueue.main.async { completion(.success(createdDir)) }
+            } catch {
+                if let destinationDir = destinationDir {
+                    try? self.fileManager.removeItem(at: destinationDir)
+                }
+                DispatchQueue.main.async { completion(.failure(error)) }
+            }
+        }
+    }
+
     func decompress(_ archiveURL: URL, to destinationDir: URL, password: String? = nil, completion: @escaping (Result<URL, Error>) -> Void) {
         backgroundQueue.async {
             do {
-                var args = ["-x", "-k"]
-                if let password = password, !password.isEmpty {
-                    args += ["--password", password]
-                }
-                args += [archiveURL.path, destinationDir.path]
-
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-                process.arguments = args
-                let errorPipe = Pipe()
-                process.standardError = errorPipe
-                try process.run()
-                process.waitUntilExit()
-
-                if process.terminationStatus != 0 {
-                    let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-                    let message = String(data: errorData, encoding: .utf8) ?? "Decompression failed"
-                    throw NSError(domain: "com.grove.decompress", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: message])
-                }
+                try self.extractArchive(archiveURL, to: destinationDir, password: password)
 
                 DispatchQueue.main.async { completion(.success(destinationDir)) }
             } catch {

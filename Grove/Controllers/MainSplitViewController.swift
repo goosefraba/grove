@@ -108,7 +108,11 @@ final class MainSplitViewController: NSSplitViewController {
 
     func setShowsHiddenFiles(_ visible: Bool) {
         guard showsHiddenFiles != visible else { return }
-        toggleHiddenFiles()
+        if isDualPaneActive {
+            dualPaneVC?.setShowsHiddenFiles(visible)
+        } else {
+            currentContentVC?.setShowsHiddenFiles(visible)
+        }
     }
 
     func setDualPaneVisible(_ visible: Bool) {
@@ -197,12 +201,15 @@ final class MainSplitViewController: NSSplitViewController {
 
     private func activateDualPane() {
         let currentURL = currentContentVC?.currentURL ?? FileManager.default.homeDirectoryForCurrentUser
+        let showHidden = currentContentVC?.showHiddenFiles ?? false
 
         removeSplitViewItem(contentItem)
 
         let dual = DualPaneViewController()
         dual.navigationDelegate = navigationDelegate
         dual.selectionDelegate = self
+        dual.leftPane.showHiddenFiles = showHidden
+        dual.rightPane.showHiddenFiles = showHidden
         dualPaneVC = dual
 
         let dualItem = NSSplitViewItem(viewController: dual)
@@ -218,14 +225,16 @@ final class MainSplitViewController: NSSplitViewController {
 
     private func deactivateDualPane() {
         guard let dualItem = dualPaneSplitViewItem else { return }
+        let currentURL = dualPaneVC?.leftPane.currentURL ?? currentContentVC?.currentURL ?? FileManager.default.homeDirectoryForCurrentUser
+        let showHidden = dualPaneVC?.leftPane.showHiddenFiles ?? false
+
         removeSplitViewItem(dualItem)
         dualPaneVC = nil
         dualPaneSplitViewItem = nil
 
-        let currentURL = currentContentVC?.currentURL ?? FileManager.default.homeDirectoryForCurrentUser
-
         let vc = FileListViewController()
         vc.delegate = self
+        vc.showHiddenFiles = showHidden
         fileListVC = vc
         currentContentVC = vc
 
@@ -242,12 +251,7 @@ final class MainSplitViewController: NSSplitViewController {
     // MARK: - Hidden Files Toggle forwarding
 
     func toggleHiddenFiles() {
-        if isDualPaneActive {
-            dualPaneVC?.leftPane.toggleHiddenFiles()
-            dualPaneVC?.rightPane.toggleHiddenFiles()
-        } else {
-            currentContentVC?.toggleHiddenFiles()
-        }
+        setShowsHiddenFiles(!showsHiddenFiles)
     }
 }
 

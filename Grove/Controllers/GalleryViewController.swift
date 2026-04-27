@@ -224,6 +224,14 @@ final class GalleryViewController: NSViewController, FileViewControllerProtocol,
         return [items[currentPreviewIndex]]
     }
 
+    private func selectItem(at url: URL) {
+        guard let index = items.firstIndex(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) else { return }
+        let indexPath = IndexPath(item: index, section: 0)
+        filmstripCollectionView.selectionIndexPaths = [indexPath]
+        filmstripCollectionView.scrollToItems(at: [indexPath], scrollPosition: .centeredHorizontally)
+        selectPreviewItem(at: index)
+    }
+
     private func selectPreviewItem(at index: Int) {
         guard index >= 0, index < items.count else { return }
         currentPreviewIndex = index
@@ -266,9 +274,22 @@ final class GalleryViewController: NSViewController, FileViewControllerProtocol,
         statusBar.stringValue = "\(itemText)\(selectionText)\(spaceText)"
     }
 
+    private func renameSelectedFile() {
+        guard let item = selectedItems.first else { return }
+        FileRenameHelper.presentRenameSheet(for: item, from: self) { [weak self] newURL in
+            self?.reloadContents()
+            self?.selectItem(at: newURL)
+        }
+    }
+
     // MARK: - Keyboard navigation
 
     override func keyDown(with event: NSEvent) {
+        if event.keyCode == 36, event.modifierFlags.contains(.control) {
+            renameSelectedFile()
+            return
+        }
+
         switch event.keyCode {
         case 123: // Left arrow
             if currentPreviewIndex > 0 {

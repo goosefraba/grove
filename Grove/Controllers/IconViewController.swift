@@ -185,6 +185,23 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
         }
     }
 
+    private func selectItem(at url: URL) {
+        guard let index = items.firstIndex(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) else { return }
+        let indexPath = IndexPath(item: index, section: 0)
+        collectionView.selectionIndexPaths = [indexPath]
+        collectionView.scrollToItems(at: [indexPath], scrollPosition: .centeredVertically)
+        delegate?.fileListDidSelect(items: selectedItems)
+        updateStatusBar()
+    }
+
+    private func renameSelectedFile() {
+        guard selectedItems.count == 1, let item = selectedItems.first else { return }
+        FileRenameHelper.presentRenameSheet(for: item, from: self) { [weak self] newURL in
+            self?.reloadContents()
+            self?.selectItem(at: newURL)
+        }
+    }
+
     private func updateStatusBar() {
         let count = items.count
         let selectedCount = collectionView.selectionIndexPaths.count
@@ -243,6 +260,15 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
         }
     }
 
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 36, event.modifierFlags.contains(.control) {
+            renameSelectedFile()
+            return
+        }
+
+        super.keyDown(with: event)
+    }
+
     // MARK: - Drag and Drop
 
     func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> (any NSPasteboardWriting)? {
@@ -278,10 +304,15 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
         }
 
         do {
+            let conflictPrompt = FileConflictResolutionPrompt(window: view.window)
             if draggingInfo.draggingSourceOperationMask.contains(.move) {
-                _ = try FileOperationService.shared.move(urls, to: destination)
+                _ = try FileOperationService.shared.moveResolvingConflicts(urls, to: destination) { conflict in
+                    conflictPrompt.resolve(conflict)
+                }
             } else {
-                _ = try FileOperationService.shared.copy(urls, to: destination)
+                _ = try FileOperationService.shared.copyResolvingConflicts(urls, to: destination) { conflict in
+                    conflictPrompt.resolve(conflict)
+                }
             }
             reloadContents()
             return true
