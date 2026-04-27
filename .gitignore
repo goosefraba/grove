@@ -2,6 +2,7 @@
 build/
 DerivedData/
 .derivedData/
+.app-install-test/
 *.pbxuser
 !default.pbxuser
 *.mode1v3
