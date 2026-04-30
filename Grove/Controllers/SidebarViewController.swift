@@ -67,6 +67,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         outlineView.dataSource = self
         outlineView.delegate = self
         outlineView.rowSizeStyle = .default
+        outlineView.rowHeight = 22
         outlineView.style = .sourceList
         outlineView.floatsGroupRows = false
 
@@ -293,7 +294,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             }
 
             cell.textField?.stringValue = section.rawValue
-            cell.textField?.font = .systemFont(ofSize: 11, weight: .semibold)
+            cell.textField?.font = .systemFont(ofSize: GroveUI.sidebarSectionFontSize, weight: .semibold)
             cell.textField?.textColor = .secondaryLabelColor
             cell.setAccessibilityLabel("Section: \(section.rawValue)")
             cell.setAccessibilityRole(.group)
@@ -331,6 +332,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             }
 
             cell.textField?.stringValue = sidebarItem.title
+            cell.textField?.font = .systemFont(ofSize: GroveUI.sidebarFontSize)
             cell.imageView?.image = NSImage(systemSymbolName: sidebarItem.systemImage, accessibilityDescription: sidebarItem.title)
             cell.imageView?.contentTintColor = .controlAccentColor
             cell.setAccessibilityLabel("\(sidebarItem.title) - \(sidebarItem.url.path)")

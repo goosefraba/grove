@@ -74,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @objc private func windowDidClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
+        saveWindowStates()
         windowControllers.removeAll { $0.window === window }
     }
 
@@ -148,7 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     @objc func createNewFolder(_ sender: Any?) {
-        currentFileListVC?.createNewFolder()
+        currentSplitVC?.createNewFolder()
     }
 
     @objc func openFile(_ sender: Any?) {
@@ -261,9 +262,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
         editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
         editMenu.addItem(.separator())
-        editMenu.addItem(withTitle: "Cut", action: #selector(cutFiles(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy", action: #selector(copyFiles(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: #selector(pasteFiles(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSResponder.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(.separator())
         let deleteItem = NSMenuItem(title: "Move to Trash", action: #selector(deleteFiles(_:)), keyEquivalent: "\u{8}")

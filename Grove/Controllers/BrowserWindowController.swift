@@ -1,5 +1,30 @@
 import AppKit
 
+protocol BrowserWindowFileDropDelegate: AnyObject {
+    func browserWindow(_ window: BrowserWindow, validateFileDropWith info: any NSDraggingInfo) -> NSDragOperation
+    func browserWindow(_ window: BrowserWindow, acceptFileDropWith info: any NSDraggingInfo) -> Bool
+}
+
+final class BrowserWindow: NSWindow, NSDraggingDestination {
+    weak var fileDropDelegate: BrowserWindowFileDropDelegate?
+
+    func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        fileDropDelegate?.browserWindow(self, validateFileDropWith: sender) ?? []
+    }
+
+    func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        fileDropDelegate?.browserWindow(self, validateFileDropWith: sender) ?? []
+    }
+
+    func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        (fileDropDelegate?.browserWindow(self, validateFileDropWith: sender) ?? []).isEmpty == false
+    }
+
+    func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        fileDropDelegate?.browserWindow(self, acceptFileDropWith: sender) ?? false
+    }
+}
+
 final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSearchFieldDelegate {
 
     private let splitVC = MainSplitViewController()
@@ -10,7 +35,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
 
     private var backButton: NSToolbarItem?
     private var forwardButton: NSToolbarItem?
-    private var hiddenFilesButton: NSButton?
+    private var hiddenFilesItem: NSToolbarItem?
 
     var currentURL: URL { history.currentURL }
 
@@ -21,6 +46,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
     private let searchID = NSToolbarItem.Identifier("Search")
     private let hiddenFilesID = NSToolbarItem.Identifier("HiddenFiles")
     private let inspectorID = NSToolbarItem.Identifier("Inspector")
+    private let newFolderID = NSToolbarItem.Identifier("NewFolder")
 
     convenience init() {
         let initialURL = FileManager.default.homeDirectoryForCurrentUser
@@ -30,7 +56,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
     init(initialURL: URL) {
         history = NavigationHistory(initialURL: initialURL)
 
-        let window = NSWindow(
+        let window = BrowserWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
@@ -46,6 +72,8 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
         window.center()
 
         super.init(window: window)
+        window.fileDropDelegate = self
+        window.registerForDraggedTypes([.fileURL])
 
         window.contentViewController = splitVC
         splitVC.navigationDelegate = self
@@ -151,11 +179,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
         if let frame = window?.frame {
             state["windowFrame"] = NSStringFromRect(frame)
         }
-        if let splitView = splitVC.splitView as NSSplitView? {
-            let sidebarWidth = splitView.isSubviewCollapsed(splitView.subviews[0])
-                ? 0 : splitView.subviews[0].frame.width
-            state["sidebarWidth"] = sidebarWidth
-        }
+        state["sidebarWidth"] = splitVC.sidebarWidth
         state["inspectorCollapsed"] = splitVC.inspectorIsCollapsed
         return state
     }
@@ -178,8 +202,10 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
             }
         }
 
-        if let sidebarWidth = dict["sidebarWidth"] as? CGFloat, sidebarWidth > 0 {
-            wc.splitVC.setSidebarWidth(sidebarWidth)
+        if let sidebarWidth = Self.cgFloatValue(from: dict["sidebarWidth"]), sidebarWidth > 0 {
+            DispatchQueue.main.async {
+                wc.splitVC.setSidebarWidth(sidebarWidth)
+            }
         }
 
         if let inspectorCollapsed = dict["inspectorCollapsed"] as? Bool, !inspectorCollapsed {
@@ -204,6 +230,19 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
         }
 
         return wc
+    }
+
+    private static func cgFloatValue(from value: Any?) -> CGFloat? {
+        if let value = value as? CGFloat {
+            return value
+        }
+        if let value = value as? Double {
+            return CGFloat(value)
+        }
+        if let value = value as? NSNumber {
+            return CGFloat(truncating: value)
+        }
+        return nil
     }
 
     // MARK: - NSToolbarDelegate
@@ -256,28 +295,16 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
         case searchID:
             let item = NSSearchToolbarItem(itemIdentifier: searchID)
             item.searchField = searchField
-            item.preferredWidthForSearchField = 180
+            item.preferredWidthForSearchField = 160
             return item
 
         case hiddenFilesID:
             let item = NSToolbarItem(itemIdentifier: hiddenFilesID)
-            let button = NSButton(image: NSImage(systemSymbolName: "eye.slash", accessibilityDescription: "Hidden Files") ?? NSImage(), target: self, action: #selector(toggleHiddenFiles(_:)))
-            button.setButtonType(.toggle)
-            button.bezelStyle = .texturedRounded
-            button.imagePosition = .imageOnly
-            button.toolTip = "Show hidden files"
-            button.setAccessibilityLabel("Show hidden files")
-            button.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                button.widthAnchor.constraint(equalToConstant: 28),
-                button.heightAnchor.constraint(equalToConstant: 28)
-            ])
-
-            item.view = button
             item.label = "Hidden Files"
             item.paletteLabel = "Show Hidden Files"
-            item.toolTip = "Show hidden files"
-            hiddenFilesButton = button
+            item.target = self
+            item.action = #selector(toggleHiddenFiles(_:))
+            hiddenFilesItem = item
             updateHiddenFilesButtonState()
             return item
 
@@ -288,6 +315,15 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
             item.target = self
             item.action = #selector(toggleInspector(_:))
             item.toolTip = "Toggle inspector panel"
+            return item
+
+        case newFolderID:
+            let item = NSToolbarItem(itemIdentifier: newFolderID)
+            item.image = NSImage(systemSymbolName: "folder.badge.plus", accessibilityDescription: "New Folder")
+            item.label = "New Folder"
+            item.target = self
+            item.action = #selector(createNewFolder(_:))
+            item.toolTip = "Create new folder"
             return item
 
         default:
@@ -304,6 +340,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
             searchID,
             hiddenFilesID,
             inspectorID,
+            newFolderID,
         ]
     }
 
@@ -315,6 +352,10 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
 
     @objc func toggleInspector(_ sender: Any?) {
         splitVC.toggleInspector()
+    }
+
+    @objc func createNewFolder(_ sender: Any?) {
+        splitVC.createNewFolder()
     }
 
     @objc func toggleHiddenFiles(_ sender: Any?) {
@@ -329,12 +370,13 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
 
     private func updateHiddenFilesButtonState() {
         let showsHidden = splitVC.showsHiddenFiles
-        hiddenFilesButton?.state = showsHidden ? .on : .off
-        hiddenFilesButton?.image = NSImage(
+        hiddenFilesItem?.image = NSImage(
             systemSymbolName: showsHidden ? "eye" : "eye.slash",
             accessibilityDescription: showsHidden ? "Hide Hidden Files" : "Show Hidden Files"
         )
-        hiddenFilesButton?.toolTip = showsHidden ? "Hide hidden files" : "Show hidden files"
+        hiddenFilesItem?.label = showsHidden ? "Hide Hidden" : "Show Hidden"
+        hiddenFilesItem?.paletteLabel = showsHidden ? "Hide Hidden Files" : "Show Hidden Files"
+        hiddenFilesItem?.toolTip = showsHidden ? "Hide hidden files" : "Show hidden files"
     }
 
     @objc override func newWindowForTab(_ sender: Any?) {
@@ -381,5 +423,97 @@ extension BrowserWindowController: MainSplitViewControllerDelegate {
 
     func splitViewSearchSupportDidChange() {
         updateSearchFieldAvailability()
+    }
+}
+
+extension BrowserWindowController: BrowserWindowFileDropDelegate {
+    func browserWindow(_ window: BrowserWindow, validateFileDropWith info: any NSDraggingInfo) -> NSDragOperation {
+        guard isFileDropInTabArea(info, of: window),
+              info.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) else {
+            return []
+        }
+        return info.draggingSourceOperationMask.contains(.move) ? .move : .copy
+    }
+
+    func browserWindow(_ window: BrowserWindow, acceptFileDropWith info: any NSDraggingInfo) -> Bool {
+        guard isFileDropInTabArea(info, of: window),
+              let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+              !urls.isEmpty else {
+            return false
+        }
+
+        let isMove = info.draggingSourceOperationMask.contains(.move)
+        return transferDroppedFiles(urls, to: currentURL, isMove: isMove)
+    }
+
+    private func isFileDropInTabArea(_ info: any NSDraggingInfo, of window: BrowserWindow) -> Bool {
+        let point = info.draggingLocation
+        let topBandHeight = max(window.frame.height - window.contentRect(forFrameRect: window.frame).height, 64)
+
+        if point.y >= window.frame.height - topBandHeight {
+            return true
+        }
+
+        let layoutRect = window.contentLayoutRect
+        return !layoutRect.isEmpty && point.y >= layoutRect.maxY
+    }
+
+    private func transferDroppedFiles(_ urls: [URL], to destination: URL, isMove: Bool) -> Bool {
+        do {
+            let conflictPrompt = FileConflictResolutionPrompt(window: window)
+            let resultURLs: [URL]
+            if isMove {
+                resultURLs = try FileOperationService.shared.moveResolvingConflicts(urls, to: destination) { conflict in
+                    conflictPrompt.resolve(conflict)
+                }
+                registerUndoMove(originalURLs: urls, movedURLs: resultURLs)
+            } else {
+                resultURLs = try FileOperationService.shared.copyResolvingConflicts(urls, to: destination) { conflict in
+                    conflictPrompt.resolve(conflict)
+                }
+                registerUndoCopy(copiedURLs: resultURLs)
+            }
+            splitVC.navigate(to: destination)
+            return true
+        } catch {
+            showError(error)
+            return false
+        }
+    }
+
+    private func registerUndoMove(originalURLs: [URL], movedURLs: [URL]) {
+        guard let undoManager = window?.undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { target in
+            do {
+                for (movedURL, originalURL) in zip(movedURLs, originalURLs) {
+                    _ = try FileOperationService.shared.moveResolvingConflicts([movedURL], to: originalURL.deletingLastPathComponent()) { _ in
+                        .keepBoth
+                    }
+                }
+            } catch {
+                target.showError(error)
+            }
+        }
+        undoManager.setActionName("Move")
+    }
+
+    private func registerUndoCopy(copiedURLs: [URL]) {
+        guard let undoManager = window?.undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { target in
+            do {
+                _ = try FileOperationService.shared.moveToTrash(copiedURLs)
+            } catch {
+                target.showError(error)
+            }
+        }
+        undoManager.setActionName("Copy")
+    }
+
+    private func showError(_ error: Error) {
+        guard let window else {
+            NSAlert(error: error).runModal()
+            return
+        }
+        NSAlert(error: error).beginSheetModal(for: window, completionHandler: nil)
     }
 }

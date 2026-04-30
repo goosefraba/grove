@@ -16,9 +16,23 @@ protocol FileViewControllerProtocol: AnyObject {
     func loadDirectory(_ url: URL)
     func toggleHiddenFiles()
     func setShowsHiddenFiles(_ visible: Bool)
+    func createNewFolder()
     func setToolbarFilterText(_ text: String)
     func performToolbarSearch(_ query: String)
     func clearToolbarSearch()
+}
+
+enum GroveUI {
+    static let contentFontSize: CGFloat = 11
+    static let sidebarFontSize: CGFloat = 12
+    static let sidebarSectionFontSize: CGFloat = 10
+    static let statusFontSize: CGFloat = 10
+    static let emptyFontSize: CGFloat = 13
+    static let pathBarFontSize: CGFloat = 11
+    static let listRowHeight: CGFloat = 20
+    static let iconLabelFontSize: CGFloat = 10
+    static let iconItemSize = NSSize(width: 84, height: 74)
+    static let iconSize: CGFloat = 44
 }
 
 extension FileViewControllerProtocol {
@@ -26,6 +40,15 @@ extension FileViewControllerProtocol {
     func setShowsHiddenFiles(_ visible: Bool) {
         guard showHiddenFiles != visible else { return }
         toggleHiddenFiles()
+    }
+    func createNewFolder() {
+        do {
+            _ = try FileOperationService.shared.createNewFolder(in: currentURL)
+            loadDirectory(currentURL)
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.runModal()
+        }
     }
     func setToolbarFilterText(_ text: String) {}
     func performToolbarSearch(_ query: String) {}

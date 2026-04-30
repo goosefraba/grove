@@ -52,7 +52,7 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
     }
 
     private func setupStatusBar() {
-        statusBar.font = .systemFont(ofSize: 11)
+        statusBar.font = .systemFont(ofSize: GroveUI.statusFontSize)
         statusBar.textColor = .secondaryLabelColor
         statusBar.translatesAutoresizingMaskIntoConstraints = false
         statusBar.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
@@ -321,7 +321,7 @@ private final class BrowserCell: NSBrowserCell {
         }
 
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 13),
+            .font: NSFont.systemFont(ofSize: GroveUI.contentFontSize),
             .foregroundColor: isHighlighted ? NSColor.alternateSelectedControlTextColor : NSColor.labelColor,
         ]
         let attrString = NSAttributedString(string: stringValue, attributes: attributes)

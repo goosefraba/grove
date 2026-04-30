@@ -43,7 +43,7 @@ final class PathBarView: NSView {
         for (index, component) in components.enumerated() {
             if index > 0 {
                 let separator = NSTextField(labelWithString: "\u{203A}")
-                separator.font = .systemFont(ofSize: 12)
+                separator.font = .systemFont(ofSize: GroveUI.pathBarFontSize)
                 separator.textColor = .tertiaryLabelColor
                 stackView.addArrangedSubview(separator)
             }
@@ -51,7 +51,7 @@ final class PathBarView: NSView {
             let button = NSButton(title: component.displayName, target: self, action: #selector(pathComponentClicked(_:)))
             button.bezelStyle = .recessed
             button.isBordered = false
-            button.font = .systemFont(ofSize: 12)
+            button.font = .systemFont(ofSize: GroveUI.pathBarFontSize)
             button.tag = index
             button.toolTip = component.path
             button.setAccessibilityLabel("Path component: \(component.path)")

@@ -4,6 +4,10 @@ import UniformTypeIdentifiers
 
 private final class FileListTableView: NSTableView {
     var onRenameShortcut: (() -> Void)?
+    var onContextMenuRow: ((Int) -> Void)?
+    var onCopyFiles: (() -> Void)?
+    var onCutFiles: (() -> Void)?
+    var onPasteFiles: (() -> Void)?
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.isRenameShortcut {
@@ -19,6 +23,51 @@ private final class FileListTableView: NSTableView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let point = convert(event.locationInWindow, from: nil)
+        onContextMenuRow?(row(at: point))
+        return super.menu(for: event)
+    }
+
+    @objc func copy(_ sender: Any?) {
+        onCopyFiles?()
+    }
+
+    @objc func cut(_ sender: Any?) {
+        onCutFiles?()
+    }
+
+    @objc func paste(_ sender: Any?) {
+        onPasteFiles?()
+    }
+}
+
+private final class FileListScrollView: NSScrollView {
+    var onBackgroundMenuRequest: (() -> Void)?
+    var onValidateBackgroundDrop: ((any NSDraggingInfo) -> NSDragOperation)?
+    var onAcceptBackgroundDrop: ((any NSDraggingInfo) -> Bool)?
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        onBackgroundMenuRequest?()
+        return super.menu(for: event) ?? menu
+    }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        onValidateBackgroundDrop?(sender) ?? []
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        onValidateBackgroundDrop?(sender) ?? []
+    }
+
+    override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        (onValidateBackgroundDrop?(sender) ?? []).isEmpty == false
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        onAcceptBackgroundDrop?(sender) ?? false
     }
 }
 
@@ -41,7 +90,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
     weak var delegate: FileListViewControllerDelegate?
 
-    private let scrollView = NSScrollView()
+    private let scrollView = FileListScrollView()
     private let tableView = FileListTableView()
     private let statusBar = NSTextField(labelWithString: "")
     private let emptyLabel = NSTextField(labelWithString: "Empty Folder")
@@ -72,10 +121,12 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     private var watcher: DirectoryWatcher?
     private var reloadWorkItem: DispatchWorkItem?
     private var spinnerWorkItem: DispatchWorkItem?
-    private var clipboard: (urls: [URL], isCut: Bool)?
+    private static let fileOperationPasteboardType = NSPasteboard.PasteboardType("com.grove.file-operation")
+    private static var clipboard: (urls: [URL], isCut: Bool)?
     private var editingRow: Int = -1
     private var pendingSelectionURL: URL?
     private var pendingRenameURL: URL?
+    private var contextMenuRow: Int?
 
     // Column identifiers
     private let nameColumn = NSUserInterfaceItemIdentifier("NameColumn")
@@ -134,10 +185,26 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         tableView.allowsMultipleSelection = true
         tableView.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         tableView.style = .fullWidth
+        tableView.rowHeight = GroveUI.listRowHeight
         tableView.doubleAction = #selector(tableViewDoubleClicked(_:))
         tableView.target = self
         tableView.onRenameShortcut = { [weak self] in
             self?.renameSelectedRow()
+        }
+        tableView.onContextMenuRow = { [weak self] row in
+            self?.contextMenuRow = row
+        }
+        tableView.onCopyFiles = { [weak self] in
+            self?.copySelectedFiles()
+        }
+        tableView.onCutFiles = { [weak self] in
+            self?.cutSelectedFiles()
+        }
+        tableView.onPasteFiles = { [weak self] in
+            self?.pasteFiles()
+        }
+        for column in tableView.tableColumns {
+            column.headerCell.font = .systemFont(ofSize: GroveUI.contentFontSize, weight: .semibold)
         }
 
         tableView.registerForDraggedTypes([.fileURL])
@@ -147,6 +214,17 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         let menu = NSMenu()
         menu.delegate = self
         tableView.menu = menu
+        scrollView.menu = menu
+        scrollView.registerForDraggedTypes([.fileURL])
+        scrollView.onBackgroundMenuRequest = { [weak self] in
+            self?.contextMenuRow = -1
+        }
+        scrollView.onValidateBackgroundDrop = { [weak self] info in
+            self?.validateBackgroundDrop(info) ?? []
+        }
+        scrollView.onAcceptBackgroundDrop = { [weak self] info in
+            self?.acceptBackgroundDrop(info) ?? false
+        }
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
@@ -156,7 +234,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     }
 
     private func setupStatusBar() {
-        statusBar.font = .systemFont(ofSize: 11)
+        statusBar.font = .systemFont(ofSize: GroveUI.statusFontSize)
         statusBar.textColor = .secondaryLabelColor
         statusBar.translatesAutoresizingMaskIntoConstraints = false
         statusBar.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
@@ -185,7 +263,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     }
 
     private func setupEmptyLabel() {
-        emptyLabel.font = .systemFont(ofSize: 14)
+        emptyLabel.font = .systemFont(ofSize: GroveUI.emptyFontSize)
         emptyLabel.textColor = .tertiaryLabelColor
         emptyLabel.alignment = .center
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -213,7 +291,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     }
 
     private func setupSearchScopeLabel() {
-        searchScopeLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        searchScopeLabel.font = .systemFont(ofSize: GroveUI.statusFontSize, weight: .medium)
         searchScopeLabel.textColor = .secondaryLabelColor
         searchScopeLabel.backgroundColor = .controlBackgroundColor
         searchScopeLabel.drawsBackground = true
@@ -577,21 +655,23 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     func copySelectedFiles() {
         let urls = selectedItems.map(\.url)
         guard !urls.isEmpty else { return }
-        clipboard = (urls: urls, isCut: false)
+        Self.clipboard = (urls: urls, isCut: false)
 
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.writeObjects(urls as [NSURL])
+        pb.setString("copy", forType: Self.fileOperationPasteboardType)
     }
 
     func cutSelectedFiles() {
         let urls = selectedItems.map(\.url)
         guard !urls.isEmpty else { return }
-        clipboard = (urls: urls, isCut: true)
+        Self.clipboard = (urls: urls, isCut: true)
 
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.writeObjects(urls as [NSURL])
+        pb.setString("cut", forType: Self.fileOperationPasteboardType)
     }
 
     func pasteFiles() {
@@ -600,7 +680,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
             .urlReadingFileURLsOnly: true
         ]) as? [URL], !urls.isEmpty else { return }
 
-        let isCut = clipboard?.isCut == true && clipboard?.urls == urls
+        let isCut = pb.string(forType: Self.fileOperationPasteboardType) == "cut"
+            || (Self.clipboard?.isCut == true && Self.clipboard?.urls == urls)
         let destination = currentURL
 
         // Use progress sheet for operations with more than 3 files
@@ -620,7 +701,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
                             }
                         }, cancelled: { progressVC.isCancelled })
                         DispatchQueue.main.async {
-                            self?.clipboard = nil
+                            Self.clipboard = nil
+                            NSPasteboard.general.clearContents()
                             self?.registerUndoMove(originalURLs: urls, movedURLs: movedURLs)
                         }
                     } else {
@@ -649,7 +731,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
             do {
                 let resultURLs = try transferFiles(urls, to: destination, isMove: isCut)
                 if isCut {
-                    clipboard = nil
+                    Self.clipboard = nil
+                    pb.clearContents()
                     registerUndoMove(originalURLs: urls, movedURLs: resultURLs)
                 } else {
                     registerUndoCopy(copiedURLs: resultURLs)
@@ -658,6 +741,18 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
                 showError(error)
             }
         }
+    }
+
+    @objc func copy(_ sender: Any?) {
+        copySelectedFiles()
+    }
+
+    @objc func cut(_ sender: Any?) {
+        cutSelectedFiles()
+    }
+
+    @objc func paste(_ sender: Any?) {
+        pasteFiles()
     }
 
     func deleteSelectedFiles() {
@@ -875,9 +970,33 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         guard let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
               !urls.isEmpty else { return false }
         let destination = (dropOperation == .on && row < items.count && items[row].isDirectory) ? items[row].url : currentURL
+        let isMove = info.draggingSourceOperationMask.contains(.move)
+        return performFileTransfer(urls, to: destination, isMove: isMove)
+    }
+
+    private func validateBackgroundDrop(_ info: any NSDraggingInfo) -> NSDragOperation {
+        guard info.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) else {
+            return []
+        }
+        return info.draggingSourceOperationMask.contains(.move) ? .move : .copy
+    }
+
+    private func acceptBackgroundDrop(_ info: any NSDraggingInfo) -> Bool {
+        guard let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+              !urls.isEmpty else { return false }
+        let isMove = info.draggingSourceOperationMask.contains(.move)
+        return performFileTransfer(urls, to: currentURL, isMove: isMove)
+    }
+
+    private func performFileTransfer(_ urls: [URL], to destination: URL, isMove: Bool) -> Bool {
         do {
-            let isMove = info.draggingSourceOperationMask.contains(.move)
-            _ = try transferFiles(urls, to: destination, isMove: isMove)
+            let resultURLs = try transferFiles(urls, to: destination, isMove: isMove)
+            if isMove {
+                registerUndoMove(originalURLs: urls, movedURLs: resultURLs)
+            } else {
+                registerUndoCopy(copiedURLs: resultURLs)
+            }
+            reloadContents()
             return true
         } catch {
             showError(error)
@@ -934,6 +1053,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
             }
         }
 
+        cell.textField?.font = .systemFont(ofSize: GroveUI.contentFontSize)
+
         switch columnID {
         case nameColumn:
             cell.textField?.stringValue = item.name
@@ -968,7 +1089,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        24
+        GroveUI.listRowHeight
     }
 
     func tableView(_ tableView: NSTableView, typeSelectStringFor tableColumn: NSTableColumn?, row: Int) -> String? {
@@ -1091,7 +1212,7 @@ extension FileListViewController: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
-        let clickedRow = tableView.clickedRow
+        let clickedRow = contextMenuRow ?? tableView.clickedRow
 
         if clickedRow < 0 || clickedRow >= items.count {
             // Background context menu
@@ -1243,7 +1364,8 @@ extension FileListViewController: NSMenuDelegate {
     }
 
     @objc private func contextRename(_ sender: Any?) {
-        let row = tableView.clickedRow >= 0 ? tableView.clickedRow : tableView.selectedRow
+        let clickedRow = contextMenuRow ?? tableView.clickedRow
+        let row = clickedRow >= 0 ? clickedRow : tableView.selectedRow
         startRenaming(at: row)
     }
 
@@ -1428,7 +1550,7 @@ extension FileListViewController: NSMenuDelegate {
     // MARK: - Add to Favorites
 
     @objc private func contextAddToFavorites(_ sender: Any?) {
-        let row = tableView.clickedRow
+        let row = contextMenuRow ?? tableView.clickedRow
         guard row >= 0, row < items.count else { return }
         let item = items[row]
         guard item.isDirectory && !item.isPackage else { return }

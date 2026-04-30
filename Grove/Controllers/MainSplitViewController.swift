@@ -83,6 +83,10 @@ final class MainSplitViewController: NSSplitViewController {
         splitView.setPosition(width, ofDividerAt: 0)
     }
 
+    var sidebarWidth: CGFloat {
+        sidebarVC.view.frame.width
+    }
+
     func togglePreviewPane() {
         previewPaneItem.animator().isCollapsed.toggle()
     }
@@ -135,6 +139,14 @@ final class MainSplitViewController: NSSplitViewController {
     func clearToolbarSearch() {
         fileListVC.clearToolbarSearch()
         currentContentVC?.clearToolbarSearch()
+    }
+
+    func createNewFolder() {
+        if isDualPaneActive {
+            dualPaneVC?.createNewFolder()
+        } else {
+            currentContentVC?.createNewFolder()
+        }
     }
 
     // MARK: - View Mode Switching

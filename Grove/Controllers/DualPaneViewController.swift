@@ -92,6 +92,10 @@ final class DualPaneViewController: NSViewController {
         rightPane.setShowsHiddenFiles(visible)
     }
 
+    func createNewFolder() {
+        activePane.createNewFolder()
+    }
+
     func switchActivePane() {
         setActivePane((activePane === leftPane) ? rightPane : leftPane)
         view.window?.makeFirstResponder(activePane.view)

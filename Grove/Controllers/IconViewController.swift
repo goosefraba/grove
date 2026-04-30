@@ -37,10 +37,10 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
 
     private func setupCollectionView() {
         let flowLayout = NSCollectionViewFlowLayout()
-        flowLayout.itemSize = NSSize(width: 90, height: 80)
-        flowLayout.minimumInteritemSpacing = 8
-        flowLayout.minimumLineSpacing = 8
-        flowLayout.sectionInset = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        flowLayout.itemSize = GroveUI.iconItemSize
+        flowLayout.minimumInteritemSpacing = 6
+        flowLayout.minimumLineSpacing = 6
+        flowLayout.sectionInset = NSEdgeInsets(top: 10, left: 10, bottom: 10, right: 10)
 
         collectionView.collectionViewLayout = flowLayout
         collectionView.dataSource = self
@@ -64,7 +64,7 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
     }
 
     private func setupStatusBar() {
-        statusBar.font = .systemFont(ofSize: 11)
+        statusBar.font = .systemFont(ofSize: GroveUI.statusFontSize)
         statusBar.textColor = .secondaryLabelColor
         statusBar.translatesAutoresizingMaskIntoConstraints = false
         statusBar.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
@@ -93,7 +93,7 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
     }
 
     private func setupEmptyLabel() {
-        emptyLabel.font = .systemFont(ofSize: 14)
+        emptyLabel.font = .systemFont(ofSize: GroveUI.emptyFontSize)
         emptyLabel.textColor = .tertiaryLabelColor
         emptyLabel.alignment = .center
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -341,7 +341,7 @@ final class IconCollectionViewItem: NSCollectionViewItem {
     private let nameLabel = NSTextField(labelWithString: "")
 
     override func loadView() {
-        view = NSView(frame: NSRect(x: 0, y: 0, width: 90, height: 80))
+        view = NSView(frame: NSRect(origin: .zero, size: GroveUI.iconItemSize))
     }
 
     override func viewDidLoad() {
@@ -351,7 +351,7 @@ final class IconCollectionViewItem: NSCollectionViewItem {
         iconImageView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(iconImageView)
 
-        nameLabel.font = .systemFont(ofSize: 11)
+        nameLabel.font = .systemFont(ofSize: GroveUI.iconLabelFontSize)
         nameLabel.alignment = .center
         nameLabel.lineBreakMode = .byTruncatingTail
         nameLabel.maximumNumberOfLines = 2
@@ -361,8 +361,8 @@ final class IconCollectionViewItem: NSCollectionViewItem {
         NSLayoutConstraint.activate([
             iconImageView.topAnchor.constraint(equalTo: view.topAnchor, constant: 4),
             iconImageView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            iconImageView.widthAnchor.constraint(equalToConstant: 48),
-            iconImageView.heightAnchor.constraint(equalToConstant: 48),
+            iconImageView.widthAnchor.constraint(equalToConstant: GroveUI.iconSize),
+            iconImageView.heightAnchor.constraint(equalToConstant: GroveUI.iconSize),
 
             nameLabel.topAnchor.constraint(equalTo: iconImageView.bottomAnchor, constant: 2),
             nameLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 2),
@@ -372,7 +372,7 @@ final class IconCollectionViewItem: NSCollectionViewItem {
 
     func configure(with fileItem: FileItem) {
         let icon = NSWorkspace.shared.icon(forFile: fileItem.url.path)
-        icon.size = NSSize(width: 48, height: 48)
+        icon.size = NSSize(width: GroveUI.iconSize, height: GroveUI.iconSize)
         iconImageView.image = icon
         nameLabel.stringValue = fileItem.name
     }

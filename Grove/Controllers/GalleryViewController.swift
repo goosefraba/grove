@@ -105,7 +105,7 @@ final class GalleryViewController: NSViewController, FileViewControllerProtocol,
     }
 
     private func setupStatusBar() {
-        statusBar.font = .systemFont(ofSize: 11)
+        statusBar.font = .systemFont(ofSize: GroveUI.statusFontSize)
         statusBar.textColor = .secondaryLabelColor
         statusBar.translatesAutoresizingMaskIntoConstraints = false
         statusBar.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
@@ -131,7 +131,7 @@ final class GalleryViewController: NSViewController, FileViewControllerProtocol,
     }
 
     private func setupEmptyLabel() {
-        emptyLabel.font = .systemFont(ofSize: 14)
+        emptyLabel.font = .systemFont(ofSize: GroveUI.emptyFontSize)
         emptyLabel.textColor = .tertiaryLabelColor
         emptyLabel.alignment = .center
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false

@@ -61,6 +61,10 @@ struct FileItem: Identifiable, Hashable {
     }
 
     static func load(from url: URL) -> FileItem? {
+        if let protectedFolderItem = protectedHomeFolderItem(for: url) {
+            return protectedFolderItem
+        }
+
         let keys: Set<URLResourceKey> = [
             .nameKey, .isDirectoryKey, .isPackageKey, .isHiddenKey,
             .fileSizeKey, .contentModificationDateKey, .creationDateKey,
@@ -94,6 +98,40 @@ struct FileItem: Identifiable, Hashable {
             posixPermissions: perms,
             tags: values.tagNames ?? []
         )
+    }
+
+    private static func protectedHomeFolderItem(for url: URL) -> FileItem? {
+        let protectedFolders = protectedHomeFolderURLs()
+        let standardizedURL = url.standardizedFileURL
+        guard protectedFolders.contains(standardizedURL) else { return nil }
+
+        return FileItem(
+            id: standardizedURL,
+            url: standardizedURL,
+            name: standardizedURL.lastPathComponent,
+            isDirectory: true,
+            isPackage: false,
+            isHidden: false,
+            size: 0,
+            dateModified: Date.distantPast,
+            dateCreated: Date.distantPast,
+            kind: "Folder",
+            contentType: .folder,
+            posixPermissions: 0,
+            tags: []
+        )
+    }
+
+    private static func protectedHomeFolderURLs() -> Set<URL> {
+        let fileManager = FileManager.default
+        let directories: [FileManager.SearchPathDirectory] = [
+            .desktopDirectory,
+            .documentDirectory,
+            .downloadsDirectory,
+        ]
+        return Set(directories.compactMap { directory in
+            fileManager.urls(for: directory, in: .userDomainMask).first?.standardizedFileURL
+        })
     }
 
     static func setTags(_ tags: [String], for url: URL) throws {
