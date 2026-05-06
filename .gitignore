@@ -21,6 +21,10 @@ xcuserdata/
 .build/
 Packages/
 
+# Local release credentials
+.grove.env
+release.env
+
 # CocoaPods
 Pods/
 

@@ -12,10 +12,10 @@ Use this checklist for manual Grove releases.
 
 ## Validation
 
-- Build locally:
+- Build, sign, notarize, and package locally:
 
 ```bash
-xcodebuild -project Grove.xcodeproj -scheme Grove -configuration Release -derivedDataPath .derivedData build
+./scripts/release_macos.sh --notarize
 ```
 
 - Run the app locally and smoke-test:
@@ -28,14 +28,14 @@ xcodebuild -project Grove.xcodeproj -scheme Grove -configuration Release -derive
 - Validate local installation:
 
 ```bash
-LAUNCH_AFTER_INSTALL=0 ./install.sh
+./scripts/release_macos.sh --ship
 ```
 
 ## Release Prep
 
 - Create a Git tag for the release.
 - Draft GitHub release notes from `CHANGELOG.md`.
-- Attach release artifacts manually if distributing a built app bundle or archive.
+- Attach `/tmp/grove-macos-release/Grove.app.zip` if distributing a built app archive.
 - Call out known limitations explicitly in release notes when relevant.
 
 ## After Release
