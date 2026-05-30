@@ -461,21 +461,22 @@ extension BrowserWindowController: BrowserWindowFileDropDelegate {
     private func transferDroppedFiles(_ urls: [URL], to destination: URL, isMove: Bool) -> Bool {
         do {
             let conflictPrompt = FileConflictResolutionPrompt(window: window)
-            let resultURLs: [URL]
+            let records: [FileOperationService.FileTransferRecord]
             if isMove {
-                resultURLs = try FileOperationService.shared.moveResolvingConflicts(urls, to: destination) { conflict in
+                records = try FileOperationService.shared.moveResolvingConflictsWithRecords(urls, to: destination) { conflict in
                     conflictPrompt.resolve(conflict)
                 }
-                registerUndoMove(originalURLs: urls, movedURLs: resultURLs)
+                registerUndoTransfer(records: records, actionName: "Move")
             } else {
-                resultURLs = try FileOperationService.shared.copyResolvingConflicts(urls, to: destination) { conflict in
+                records = try FileOperationService.shared.copyResolvingConflictsWithRecords(urls, to: destination) { conflict in
                     conflictPrompt.resolve(conflict)
                 }
-                registerUndoCopy(copiedURLs: resultURLs)
+                registerUndoTransfer(records: records, actionName: "Copy")
             }
             splitVC.navigate(to: destination)
             return true
         } catch {
+            registerUndoForPartialSideEffects(from: error, actionName: isMove ? "Move" : "Copy")
             showError(error)
             return false
         }
@@ -507,6 +508,24 @@ extension BrowserWindowController: BrowserWindowFileDropDelegate {
             }
         }
         undoManager.setActionName("Copy")
+    }
+
+    private func registerUndoTransfer(records: [FileOperationService.FileTransferRecord], actionName: String) {
+        let undoableRecords = records.filter(\.isUndoable)
+        guard !undoableRecords.isEmpty, let undoManager = window?.undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { target in
+            do {
+                try FileOperationService.shared.undoTransferRecords(undoableRecords)
+            } catch {
+                target.showError(error)
+            }
+        }
+        undoManager.setActionName(actionName)
+    }
+
+    private func registerUndoForPartialSideEffects(from error: Error, actionName: String) {
+        guard case FileOperationService.FileOperationError.partialFailure(let records, _) = error else { return }
+        registerUndoTransfer(records: records, actionName: actionName)
     }
 
     private func showError(_ error: Error) {

@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import UniformTypeIdentifiers
 import ImageIO
+import Darwin
 
 struct FileItem: Identifiable, Hashable {
     let id: URL
@@ -60,20 +61,83 @@ struct FileItem: Identifiable, Hashable {
         lhs.url == rhs.url
     }
 
-    static func load(from url: URL) -> FileItem? {
+    static func load(from url: URL, includeTags: Bool = true) -> FileItem? {
         if let protectedFolderItem = protectedHomeFolderItem(for: url) {
             return protectedFolderItem
         }
 
-        let keys: Set<URLResourceKey> = [
+        var keys: Set<URLResourceKey> = [
             .nameKey, .isDirectoryKey, .isPackageKey, .isHiddenKey,
             .fileSizeKey, .contentModificationDateKey, .creationDateKey,
-            .localizedTypeDescriptionKey, .contentTypeKey, .tagNamesKey,
+            .localizedTypeDescriptionKey, .contentTypeKey,
             .fileSecurityKey
         ]
+        if includeTags {
+            keys.insert(.tagNamesKey)
+        }
 
         guard let values = try? url.resourceValues(forKeys: keys) else {
             return nil
+        }
+
+        return load(from: url, values: values)
+    }
+
+    static func tags(for url: URL) -> [String] {
+        (try? url.resourceValues(forKeys: [.tagNamesKey]))?.tagNames ?? []
+    }
+
+    static func loadForDirectoryListing(from url: URL, name: String, showHidden: Bool) -> FileItem? {
+        if !showHidden && name.hasPrefix(".") {
+            return nil
+        }
+        if let protectedFolderItem = protectedHomeFolderItem(for: url) {
+            return protectedFolderItem
+        }
+
+        var linkInfo = stat()
+        guard lstat(url.path, &linkInfo) == 0 else {
+            return nil
+        }
+
+        let hiddenByFlag = (UInt32(linkInfo.st_flags) & UInt32(UF_HIDDEN)) != 0
+        if !showHidden && hiddenByFlag {
+            return nil
+        }
+
+        var statInfo = stat()
+        if stat(url.path, &statInfo) != 0 {
+            statInfo = linkInfo
+        }
+
+        let mode = statInfo.st_mode
+        let isDirectory = (mode & S_IFMT) == S_IFDIR
+        let type = contentType(for: url, isDirectory: isDirectory)
+        let isPackage = isDirectory && (
+            type?.conforms(to: .package) == true ||
+            packageExtensions.contains(url.pathExtension.lowercased())
+        )
+
+        return FileItem(
+            id: url,
+            url: url,
+            name: name,
+            isDirectory: isDirectory,
+            isPackage: isPackage,
+            isHidden: name.hasPrefix(".") || hiddenByFlag,
+            size: Int64(statInfo.st_size),
+            dateModified: date(from: statInfo.st_mtimespec),
+            dateCreated: date(from: statInfo.st_birthtimespec),
+            kind: isDirectory && !isPackage ? "Folder" : type?.localizedDescription ?? "Document",
+            contentType: type,
+            posixPermissions: UInt16(mode & 0o7777),
+            tags: []
+        )
+    }
+
+    static func load(from url: URL, values: URLResourceValues) -> FileItem? {
+        if let protectedFolderItem = protectedHomeFolderItem(for: url) {
+            return protectedFolderItem
         }
 
         let perms: UInt16 = {
@@ -148,6 +212,73 @@ struct FileItem: Identifiable, Hashable {
     var formattedDateModified: String {
         FileItem.dateFormatter.string(from: dateModified)
     }
+
+    static func sort(_ items: inout [FileItem], key: String, ascending: Bool) {
+        items.sort { lhs, rhs in
+            compare(lhs, rhs, key: key, ascending: ascending)
+        }
+    }
+
+    static func sorted(_ items: [FileItem], key: String, ascending: Bool) -> [FileItem] {
+        var sortedItems = items
+        sort(&sortedItems, key: key, ascending: ascending)
+        return sortedItems
+    }
+
+    static func compare(_ lhs: FileItem, _ rhs: FileItem, key: String, ascending: Bool) -> Bool {
+        if lhs.isDirectory != rhs.isDirectory {
+            return lhs.isDirectory
+        }
+
+        let result: ComparisonResult
+        switch key {
+        case "date":
+            result = compare(lhs.dateModified, rhs.dateModified)
+        case "size":
+            result = compare(lhs.size, rhs.size)
+        case "kind":
+            result = lhs.kind.localizedCaseInsensitiveCompare(rhs.kind)
+        default:
+            result = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+        }
+
+        if result == .orderedSame {
+            let tieBreak = lhs.url.path.localizedCaseInsensitiveCompare(rhs.url.path)
+            return tieBreak == .orderedAscending
+        }
+
+        return ascending ? result == .orderedAscending : result == .orderedDescending
+    }
+
+    private static func compare<T: Comparable>(_ lhs: T, _ rhs: T) -> ComparisonResult {
+        if lhs < rhs { return .orderedAscending }
+        if lhs > rhs { return .orderedDescending }
+        return .orderedSame
+    }
+
+    private static func contentType(for url: URL, isDirectory: Bool) -> UTType? {
+        if isDirectory && url.pathExtension.isEmpty {
+            return .folder
+        }
+        guard !url.pathExtension.isEmpty else {
+            return nil
+        }
+        return UTType(filenameExtension: url.pathExtension)
+    }
+
+    private static func date(from timespec: timespec) -> Date {
+        let seconds = TimeInterval(timespec.tv_sec)
+        let nanoseconds = TimeInterval(timespec.tv_nsec) / 1_000_000_000
+        return Date(timeIntervalSince1970: seconds + nanoseconds)
+    }
+
+    private static let packageExtensions: Set<String> = [
+        "app", "bundle", "framework", "kext", "plugin", "pkg",
+        "rtfd", "xcodeproj", "xcworkspace", "playground",
+        "photoslibrary", "aplibrary", "pages", "numbers", "key",
+        "logicx", "imovielibrary", "band", "gband", "wdgt",
+        "qlgenerator", "mdimporter", "saver", "prefpane",
+    ]
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()

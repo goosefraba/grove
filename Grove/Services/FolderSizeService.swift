@@ -5,23 +5,40 @@ final class FolderSizeService {
     static let shared = FolderSizeService()
 
     private let queue = DispatchQueue(label: "com.grove.foldersize", attributes: .concurrent)
+    private let stateQueue = DispatchQueue(label: "com.grove.foldersize.state")
     private let cache = NSCache<NSURL, NSNumber>()
+    private var pendingCompletions: [NSURL: [(Int64) -> Void]] = [:]
 
     private init() {
         cache.countLimit = 1000
     }
 
     func calculateSize(for url: URL, completion: @escaping (Int64) -> Void) {
-        if let cached = cache.object(forKey: url as NSURL) {
+        let key = url.standardizedFileURL as NSURL
+        if let cached = cache.object(forKey: key) {
             completion(cached.int64Value)
             return
         }
 
+        var shouldStartScan = false
+        stateQueue.sync {
+            if pendingCompletions[key] == nil {
+                pendingCompletions[key] = []
+                shouldStartScan = true
+            }
+            pendingCompletions[key]?.append(completion)
+        }
+
+        guard shouldStartScan else { return }
+
         queue.async { [weak self] in
             let size = self?.computeSize(at: url) ?? 0
-            self?.cache.setObject(NSNumber(value: size), forKey: url as NSURL)
+            self?.cache.setObject(NSNumber(value: size), forKey: key)
+            let completions = self?.stateQueue.sync { () -> [(Int64) -> Void] in
+                self?.pendingCompletions.removeValue(forKey: key) ?? []
+            } ?? []
             DispatchQueue.main.async {
-                completion(size)
+                completions.forEach { $0(size) }
             }
         }
     }
@@ -45,7 +62,7 @@ final class FolderSizeService {
     }
 
     func invalidateCache(for url: URL) {
-        cache.removeObject(forKey: url as NSURL)
+        cache.removeObject(forKey: url.standardizedFileURL as NSURL)
     }
 
     func clearCache() {

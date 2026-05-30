@@ -7,7 +7,7 @@ Use this checklist for manual Grove releases.
 - Confirm `main` is in a releasable state.
 - Review open issues and decide what is in or out of scope.
 - Update `CHANGELOG.md`.
-- Update version and build numbers in `Grove/App/Info.plist` and project settings if needed.
+- Update `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in project settings if needed.
 - Verify README and install instructions still match reality.
 
 ## Validation

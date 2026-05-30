@@ -9,6 +9,20 @@ INSTALL_DIR="${INSTALL_DIR:-$HOME/Applications}"
 APP_PATH="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION/$APP_NAME.app"
 DEST_APP="$INSTALL_DIR/$APP_NAME.app"
 
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  cat <<'EOF'
+Build and install Grove locally.
+
+Usage: ./install.sh
+
+Environment:
+  CONFIGURATION=Debug|Release
+  INSTALL_DIR=/path/to/install
+  LAUNCH_AFTER_INSTALL=0|1
+EOF
+  exit 0
+fi
+
 mkdir -p "$INSTALL_DIR"
 
 xcodebuild -project "$PROJECT_DIR/$APP_NAME.xcodeproj" \

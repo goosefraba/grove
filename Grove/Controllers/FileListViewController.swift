@@ -121,9 +121,11 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     private var watcher: DirectoryWatcher?
     private var reloadWorkItem: DispatchWorkItem?
     private var spinnerWorkItem: DispatchWorkItem?
+    private var loadGeneration: UInt = 0
     private static let fileOperationPasteboardType = NSPasteboard.PasteboardType("com.grove.file-operation")
     private static var clipboard: (urls: [URL], isCut: Bool)?
     private var editingRow: Int = -1
+    private var editingURL: URL?
     private var pendingSelectionURL: URL?
     private var pendingRenameURL: URL?
     private var contextMenuRow: Int?
@@ -332,6 +334,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     }
 
     func applyFilter() {
+        let selectedURLs = Set(selectedItems.map(\.url))
         if filterText.isEmpty {
             items = allItems
         } else {
@@ -341,6 +344,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         }
         sortItems()
         tableView.reloadData()
+        restoreSelection(previouslySelectedURLs: selectedURLs)
         updateStatusBar()
         emptyLabel.isHidden = !items.isEmpty
         if items.isEmpty && !filterText.isEmpty {
@@ -373,6 +377,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     }
 
     func clearSearch() {
+        guard isShowingSearchResults || !searchScopeLabel.isHidden || !filterText.isEmpty else { return }
         isShowingSearchResults = false
         searchScopeLabel.isHidden = true
         updateScrollViewTop()
@@ -398,6 +403,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     // MARK: - Directory Loading
 
     func loadDirectory(_ url: URL) {
+        reloadWorkItem?.cancel()
         currentURL = url
         filterText = ""
         isShowingSearchResults = false
@@ -417,12 +423,21 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
     private func scheduleReload(for eventURLs: [URL]) {
         guard shouldReload(for: eventURLs) else { return }
+        invalidateCaches(for: eventURLs)
         reloadWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
             self?.reloadContents(showLoadingIndicator: false)
         }
         reloadWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+
+    private func invalidateCaches(for eventURLs: [URL]) {
+        for url in eventURLs {
+            ThumbnailCache.shared.invalidate(url)
+            FolderSizeService.shared.invalidateCache(for: url)
+            FolderSizeService.shared.invalidateCache(for: url.deletingLastPathComponent())
+        }
     }
 
     private func shouldReload(for eventURLs: [URL]) -> Bool {
@@ -437,6 +452,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
     private func reloadContents(showLoadingIndicator: Bool = false) {
         guard !isShowingSearchResults else { return }
+        loadGeneration += 1
+        let generation = loadGeneration
         let requestURL = currentURL.standardizedFileURL
         let requestShowHiddenFiles = showHiddenFiles
         let selectedURLs = Set(selectedItems.map(\.url))
@@ -458,7 +475,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
         FileOperationService.shared.contentsOfDirectoryAsync(at: currentURL, showHidden: showHiddenFiles) { [weak self] result in
             guard let self = self else { return }
-            guard self.currentURL.standardizedFileURL == requestURL,
+            guard self.loadGeneration == generation,
+                  self.currentURL.standardizedFileURL == requestURL,
                   self.showHiddenFiles == requestShowHiddenFiles else { return }
             self.spinnerWorkItem?.cancel()
             self.loadingSpinner.stopAnimation(nil)
@@ -530,27 +548,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     }
 
     private func sortItems() {
-        items.sort { a, b in
-            // Directories first
-            if a.isDirectory != b.isDirectory {
-                return a.isDirectory
-            }
-
-            let result: Bool
-            switch sortKey {
-            case "name":
-                result = a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
-            case "date":
-                result = a.dateModified < b.dateModified
-            case "size":
-                result = a.size < b.size
-            case "kind":
-                result = a.kind.localizedCaseInsensitiveCompare(b.kind) == .orderedAscending
-            default:
-                result = a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
-            }
-            return sortAscending ? result : !result
-        }
+        FileItem.sort(&items, key: sortKey, ascending: sortAscending)
     }
 
     // MARK: - Sort Persistence
@@ -719,6 +717,19 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
                         window.endSheet(window.attachedSheet ?? NSWindow())
                         self?.dismiss(progressVC)
                     }
+                } catch FileOperationService.FileOperationError.cancelled(let records) {
+                    DispatchQueue.main.async {
+                        self?.registerUndoTransfer(records: records, actionName: isCut ? "Move" : "Copy")
+                        window.endSheet(window.attachedSheet ?? NSWindow())
+                        self?.dismiss(progressVC)
+                    }
+                } catch FileOperationService.FileOperationError.partialFailure(let records, let underlying) {
+                    DispatchQueue.main.async {
+                        self?.registerUndoTransfer(records: records, actionName: isCut ? "Move" : "Copy")
+                        window.endSheet(window.attachedSheet ?? NSWindow())
+                        self?.dismiss(progressVC)
+                        self?.showError(underlying)
+                    }
                 } catch {
                     DispatchQueue.main.async {
                         window.endSheet(window.attachedSheet ?? NSWindow())
@@ -729,15 +740,16 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
             }
         } else {
             do {
-                let resultURLs = try transferFiles(urls, to: destination, isMove: isCut)
+                let records = try transferFiles(urls, to: destination, isMove: isCut)
                 if isCut {
                     Self.clipboard = nil
                     pb.clearContents()
-                    registerUndoMove(originalURLs: urls, movedURLs: resultURLs)
+                    registerUndoTransfer(records: records, actionName: "Move")
                 } else {
-                    registerUndoCopy(copiedURLs: resultURLs)
+                    registerUndoTransfer(records: records, actionName: "Copy")
                 }
             } catch {
+                registerUndoForPartialSideEffects(from: error, actionName: isCut ? "Move" : "Copy")
                 showError(error)
             }
         }
@@ -807,6 +819,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         guard let cellView = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
               let textField = cellView.textField else { return }
         editingRow = row
+        editingURL = items[row].url
         textField.isEditable = true
         textField.delegate = self
         textField.selectText(nil)
@@ -913,6 +926,24 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         undoManager.setActionName("Copy")
     }
 
+    private func registerUndoTransfer(records: [FileOperationService.FileTransferRecord], actionName: String) {
+        let undoableRecords = records.filter(\.isUndoable)
+        guard !undoableRecords.isEmpty, let undoManager = fileUndoManager else { return }
+        undoManager.registerUndo(withTarget: self) { target in
+            do {
+                try FileOperationService.shared.undoTransferRecords(undoableRecords)
+            } catch {
+                target.showError(error)
+            }
+        }
+        undoManager.setActionName(actionName)
+    }
+
+    private func registerUndoForPartialSideEffects(from error: Error, actionName: String) {
+        guard case FileOperationService.FileOperationError.partialFailure(let records, _) = error else { return }
+        registerUndoTransfer(records: records, actionName: actionName)
+    }
+
     private func showError(_ error: Error) {
         guard let window = view.window else {
             let alert = NSAlert(error: error)
@@ -935,8 +966,10 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         sortKey = key
         sortAscending = descriptor.ascending
         saveSortPreference()
+        let selectedURLs = Set(selectedItems.map(\.url))
         sortItems()
         tableView.reloadData()
+        restoreSelection(previouslySelectedURLs: selectedURLs)
 
         // Update sort indicator
         for column in tableView.tableColumns {
@@ -990,15 +1023,12 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
     private func performFileTransfer(_ urls: [URL], to destination: URL, isMove: Bool) -> Bool {
         do {
-            let resultURLs = try transferFiles(urls, to: destination, isMove: isMove)
-            if isMove {
-                registerUndoMove(originalURLs: urls, movedURLs: resultURLs)
-            } else {
-                registerUndoCopy(copiedURLs: resultURLs)
-            }
+            let records = try transferFiles(urls, to: destination, isMove: isMove)
+            registerUndoTransfer(records: records, actionName: isMove ? "Move" : "Copy")
             reloadContents()
             return true
         } catch {
+            registerUndoForPartialSideEffects(from: error, actionName: isMove ? "Move" : "Copy")
             showError(error)
             return false
         }
@@ -1188,13 +1218,21 @@ extension FileListViewController: NSTextFieldDelegate {
         guard let textField = control as? NSTextField else { return true }
         let newName = textField.stringValue
         let row = editingRow
-        guard row >= 0, row < items.count else { return true }
-        let item = items[row]
+        guard row >= 0 else { return true }
+        guard let editedURL = editingURL,
+              let item = items.first(where: { $0.url.standardizedFileURL == editedURL.standardizedFileURL }) else {
+            textField.isEditable = false
+            editingRow = -1
+            editingURL = nil
+            return true
+        }
 
         if newName != item.name && !newName.isEmpty {
             do {
                 let newURL = try FileOperationService.shared.rename(item.url, to: newName)
                 registerUndoRename(originalURL: item.url, newURL: newURL)
+                pendingSelectionURL = newURL
+                reloadContents()
             } catch {
                 showError(error)
             }
@@ -1202,6 +1240,7 @@ extension FileListViewController: NSTextFieldDelegate {
 
         textField.isEditable = false
         editingRow = -1
+        editingURL = nil
         return true
     }
 }
@@ -1590,9 +1629,12 @@ extension FileListViewController: NSMenuDelegate {
         let selected = selectedItems
         let currentTags: Set<String> = {
             guard let first = selected.first else { return [] }
-            if selected.count == 1 { return Set(first.tags) }
+            let firstTags = Set(FileItem.tags(for: first.url))
+            if selected.count == 1 { return firstTags }
             // For multiple selection, show common tags as checked
-            return Set(first.tags).intersection(selected.dropFirst().reduce(Set(first.tags)) { $0.intersection(Set($1.tags)) })
+            return selected.dropFirst().reduce(firstTags) { commonTags, item in
+                commonTags.intersection(Set(FileItem.tags(for: item.url)))
+            }
         }()
 
         let standardTags = ["Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Gray"]
@@ -1624,7 +1666,7 @@ extension FileListViewController: NSMenuDelegate {
         guard !selected.isEmpty else { return }
 
         for item in selected {
-            var tags = item.tags
+            var tags = FileItem.tags(for: item.url)
             if tags.contains(tagName) {
                 tags.removeAll { $0 == tagName }
             } else {
@@ -1689,14 +1731,14 @@ extension FileListViewController: NSMenuDelegate {
         }
     }
 
-    private func transferFiles(_ urls: [URL], to destination: URL, isMove: Bool) throws -> [URL] {
+    private func transferFiles(_ urls: [URL], to destination: URL, isMove: Bool) throws -> [FileOperationService.FileTransferRecord] {
         let conflictPrompt = FileConflictResolutionPrompt(window: view.window)
         if isMove {
-            return try FileOperationService.shared.moveResolvingConflicts(urls, to: destination) { conflict in
+            return try FileOperationService.shared.moveResolvingConflictsWithRecords(urls, to: destination) { conflict in
                 conflictPrompt.resolve(conflict)
             }
         } else {
-            return try FileOperationService.shared.copyResolvingConflicts(urls, to: destination) { conflict in
+            return try FileOperationService.shared.copyResolvingConflictsWithRecords(urls, to: destination) { conflict in
                 conflictPrompt.resolve(conflict)
             }
         }

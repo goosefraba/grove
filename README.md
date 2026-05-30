@@ -73,7 +73,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, workflow, and pull request exp
 
 ## Distribution
 
-Grove is currently set up for direct distribution and source builds. A notarized release pipeline is not included yet.
+Grove is currently set up for direct distribution and source builds. The release script in `scripts/release_macos.sh` can build, sign, notarize, staple, package, and install local release builds when the required Apple signing credentials are available.
 
 ## License
 

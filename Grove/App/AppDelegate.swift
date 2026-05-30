@@ -192,6 +192,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
+        case #selector(copyFiles(_:)),
+             #selector(cutFiles(_:)),
+             #selector(pasteFiles(_:)),
+             #selector(deleteFiles(_:)),
+             #selector(duplicateFiles(_:)),
+             #selector(batchRenameFiles(_:)),
+             #selector(openFile(_:)):
+            return currentFileListVC != nil
         case #selector(toggleHiddenFiles(_:)):
             let showsHiddenFiles = currentSplitVC?.showsHiddenFiles ?? false
             menuItem.state = showsHiddenFiles ? .on : .off
@@ -212,7 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     private var currentFileListVC: FileListViewController? {
-        currentSplitVC?.fileListVC
+        currentSplitVC?.activeFileListViewController
     }
 
     // MARK: - Main Menu

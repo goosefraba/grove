@@ -81,6 +81,7 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
     }
 
     func loadDirectory(_ url: URL) {
+        reloadWorkItem?.cancel()
         currentURL = url
         columnItems.removeAll()
         columnPaths.removeAll()
@@ -94,21 +95,37 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
         let components = pathHierarchy(for: url)
         for (index, componentURL) in components.enumerated() {
             columnPaths[index] = componentURL
-            columnItems[index] = loadItems(at: componentURL)
+            var items = loadItems(at: componentURL)
+            if index + 1 < components.count {
+                items = itemsIncludingPathComponent(components[index + 1], in: items)
+            }
+            columnItems[index] = items
         }
 
         browser.loadColumnZero()
 
-        // Select items to reveal columns for the path
+        revealPath(components)
+
+        updateStatusBar()
+    }
+
+    private func revealPath(_ components: [URL]) {
+        guard components.count > 1 else { return }
+
         for column in 0..<components.count - 1 {
             guard let items = columnItems[column] else { continue }
-            let nextURL = components[column + 1]
-            if let row = items.firstIndex(where: { $0.url.standardizedFileURL == nextURL.standardizedFileURL }) {
-                browser.selectRow(row, inColumn: column)
+
+            let nextURL = components[column + 1].standardizedFileURL
+            guard let row = items.firstIndex(where: { $0.url.standardizedFileURL == nextURL }) else { continue }
+
+            browser.selectRow(row, inColumn: column)
+
+            if column + 1 < components.count {
+                browser.reloadColumn(column + 1)
             }
         }
 
-        updateStatusBar()
+        browser.scrollColumnToVisible(components.count - 1)
     }
 
     private func pathHierarchy(for url: URL) -> [URL] {
@@ -125,26 +142,27 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
         }
     }
 
-    private func sortItems(_ items: inout [FileItem]) {
-        items.sort { a, b in
-            if a.isDirectory != b.isDirectory {
-                return a.isDirectory
-            }
-            let result: Bool
-            switch sortKey {
-            case "name":
-                result = a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
-            case "date":
-                result = a.dateModified < b.dateModified
-            case "size":
-                result = a.size < b.size
-            case "kind":
-                result = a.kind.localizedCaseInsensitiveCompare(b.kind) == .orderedAscending
-            default:
-                result = a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
-            }
-            return sortAscending ? result : !result
+    private func itemsIncludingPathComponent(_ componentURL: URL, in items: [FileItem]) -> [FileItem] {
+        let standardizedURL = componentURL.standardizedFileURL
+        if items.contains(where: { $0.url.standardizedFileURL == standardizedURL }) {
+            return items
         }
+        guard let item = FileItem.loadForDirectoryListing(
+            from: componentURL,
+            name: componentURL.lastPathComponent,
+            showHidden: true
+        ) else {
+            return items
+        }
+
+        var updatedItems = items
+        updatedItems.append(item)
+        sortItems(&updatedItems)
+        return updatedItems
+    }
+
+    private func sortItems(_ items: inout [FileItem]) {
+        FileItem.sort(&items, key: sortKey, ascending: sortAscending)
     }
 
     private func scheduleReload() {
@@ -282,8 +300,11 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
 
         let item = items[row]
         browserCell.stringValue = item.name
-        browserCell.image = ThumbnailCache.shared.iconAsync(for: item.url) { [weak browser] icon in
-            browser?.reloadColumn(column)
+        let itemURL = item.url
+        browserCell.image = ThumbnailCache.shared.iconAsync(for: itemURL) { [weak browser, weak browserCell] icon in
+            guard browserCell?.stringValue == item.name else { return }
+            browserCell?.image = icon
+            browser?.setNeedsDisplay(browser?.bounds ?? .zero)
         }
         browserCell.isLeaf = !(item.isDirectory && !item.isPackage)
     }

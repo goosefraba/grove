@@ -128,6 +128,11 @@ final class MainSplitViewController: NSSplitViewController {
         !isDualPaneActive && (currentContentVC?.supportsToolbarSearch ?? false)
     }
 
+    var activeFileListViewController: FileListViewController? {
+        guard !isDualPaneActive else { return nil }
+        return currentContentVC as? FileListViewController
+    }
+
     func setToolbarFilterText(_ text: String) {
         currentContentVC?.setToolbarFilterText(text)
     }
@@ -137,7 +142,9 @@ final class MainSplitViewController: NSSplitViewController {
     }
 
     func clearToolbarSearch() {
-        fileListVC.clearToolbarSearch()
+        if activeFileListViewController == nil {
+            fileListVC.clearToolbarSearch()
+        }
         currentContentVC?.clearToolbarSearch()
     }
 

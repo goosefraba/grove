@@ -16,6 +16,7 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
 
     private var watcher: DirectoryWatcher?
     private var reloadWorkItem: DispatchWorkItem?
+    private var loadGeneration: UInt = 0
 
     private var sortKey: String = "name"
     private var sortAscending: Bool = true
@@ -51,6 +52,9 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
         collectionView.backgroundColors = [.clear]
 
         collectionView.register(IconCollectionViewItem.self, forItemWithIdentifier: Self.itemIdentifier)
+        let doubleClick = NSClickGestureRecognizer(target: self, action: #selector(collectionViewDoubleClicked(_:)))
+        doubleClick.numberOfClicksRequired = 2
+        collectionView.addGestureRecognizer(doubleClick)
 
         collectionView.registerForDraggedTypes([.fileURL])
         collectionView.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
@@ -107,6 +111,7 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
     }
 
     func loadDirectory(_ url: URL) {
+        reloadWorkItem?.cancel()
         currentURL = url
 
         watcher?.stop()
@@ -127,50 +132,44 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
     }
 
     private func reloadContents() {
+        loadGeneration += 1
+        let generation = loadGeneration
+        let requestURL = currentURL.standardizedFileURL
+        let requestShowHiddenFiles = showHiddenFiles
         let selectedURLs = Set(selectedItems.map(\.url))
-        do {
-            items = try FileOperationService.shared.contentsOfDirectory(at: currentURL, showHidden: showHiddenFiles)
-            sortItems()
-            collectionView.reloadData()
+
+        FileOperationService.shared.contentsOfDirectoryAsync(at: requestURL, showHidden: requestShowHiddenFiles) { [weak self] result in
+            guard let self = self,
+                  self.loadGeneration == generation,
+                  self.currentURL.standardizedFileURL == requestURL,
+                  self.showHiddenFiles == requestShowHiddenFiles else { return }
+
+            switch result {
+            case .success(let loadedItems):
+                self.items = FileItem.sorted(loadedItems, key: self.sortKey, ascending: self.sortAscending)
+                self.collectionView.reloadData()
             // Restore selection
-            let newSelection = Set(items.indices.filter { selectedURLs.contains(items[$0].url) }.map {
-                IndexPath(item: $0, section: 0)
-            })
-            if !newSelection.isEmpty {
-                collectionView.selectionIndexPaths = newSelection
+                let newSelection = Set(self.items.indices.filter { selectedURLs.contains(self.items[$0].url) }.map {
+                    IndexPath(item: $0, section: 0)
+                })
+                if !newSelection.isEmpty {
+                    self.collectionView.selectionIndexPaths = newSelection
+                }
+                self.updateStatusBar()
+                self.emptyLabel.stringValue = "This folder is empty"
+                self.emptyLabel.isHidden = !self.items.isEmpty
+            case .failure:
+                self.items = []
+                self.collectionView.reloadData()
+                self.updateStatusBar()
+                self.emptyLabel.stringValue = "Unable to load folder contents."
+                self.emptyLabel.isHidden = false
             }
-            updateStatusBar()
-            emptyLabel.stringValue = "This folder is empty"
-            emptyLabel.isHidden = !items.isEmpty
-        } catch {
-            items = []
-            collectionView.reloadData()
-            updateStatusBar()
-            emptyLabel.stringValue = "Unable to load folder contents."
-            emptyLabel.isHidden = false
         }
     }
 
     private func sortItems() {
-        items.sort { a, b in
-            if a.isDirectory != b.isDirectory {
-                return a.isDirectory
-            }
-            let result: Bool
-            switch sortKey {
-            case "name":
-                result = a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
-            case "date":
-                result = a.dateModified < b.dateModified
-            case "size":
-                result = a.size < b.size
-            case "kind":
-                result = a.kind.localizedCaseInsensitiveCompare(b.kind) == .orderedAscending
-            default:
-                result = a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
-            }
-            return sortAscending ? result : !result
-        }
+        FileItem.sort(&items, key: sortKey, ascending: sortAscending)
     }
 
     func toggleHiddenFiles() {
@@ -239,14 +238,6 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
         updateStatusBar()
     }
 
-    // Double-click handling
-    override func viewDidAppear() {
-        super.viewDidAppear()
-        let doubleClick = NSClickGestureRecognizer(target: self, action: #selector(collectionViewDoubleClicked(_:)))
-        doubleClick.numberOfClicksRequired = 2
-        collectionView.addGestureRecognizer(doubleClick)
-    }
-
     @objc private func collectionViewDoubleClicked(_ sender: NSClickGestureRecognizer) {
         let point = sender.location(in: collectionView)
         guard let indexPath = collectionView.indexPathForItem(at: point),
@@ -277,6 +268,9 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
     }
 
     func collectionView(_ collectionView: NSCollectionView, validateDrop draggingInfo: any NSDraggingInfo, proposedIndexPath proposedDropIndexPath: AutoreleasingUnsafeMutablePointer<NSIndexPath>, dropOperation proposedDropOperation: UnsafeMutablePointer<NSCollectionView.DropOperation>) -> NSDragOperation {
+        guard draggingInfo.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) else {
+            return []
+        }
         let index = proposedDropIndexPath.pointee.item
 
         // If dropping on a specific item, only accept if it's a navigable directory
@@ -305,21 +299,40 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
 
         do {
             let conflictPrompt = FileConflictResolutionPrompt(window: view.window)
+            let records: [FileOperationService.FileTransferRecord]
             if draggingInfo.draggingSourceOperationMask.contains(.move) {
-                _ = try FileOperationService.shared.moveResolvingConflicts(urls, to: destination) { conflict in
+                records = try FileOperationService.shared.moveResolvingConflictsWithRecords(urls, to: destination) { conflict in
                     conflictPrompt.resolve(conflict)
                 }
             } else {
-                _ = try FileOperationService.shared.copyResolvingConflicts(urls, to: destination) { conflict in
+                records = try FileOperationService.shared.copyResolvingConflictsWithRecords(urls, to: destination) { conflict in
                     conflictPrompt.resolve(conflict)
                 }
             }
+            registerUndoTransfer(records: records, actionName: draggingInfo.draggingSourceOperationMask.contains(.move) ? "Move" : "Copy")
             reloadContents()
             return true
+        } catch FileOperationService.FileOperationError.partialFailure(let records, let underlying) {
+            registerUndoTransfer(records: records, actionName: draggingInfo.draggingSourceOperationMask.contains(.move) ? "Move" : "Copy")
+            showError(underlying)
+            return false
         } catch {
             showError(error)
             return false
         }
+    }
+
+    private func registerUndoTransfer(records: [FileOperationService.FileTransferRecord], actionName: String) {
+        let undoableRecords = records.filter(\.isUndoable)
+        guard !undoableRecords.isEmpty, let undoManager = view.window?.undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { target in
+            do {
+                try FileOperationService.shared.undoTransferRecords(undoableRecords)
+            } catch {
+                target.showError(error)
+            }
+        }
+        undoManager.setActionName(actionName)
     }
 
     private func showError(_ error: Error) {
@@ -371,9 +384,10 @@ final class IconCollectionViewItem: NSCollectionViewItem {
     }
 
     func configure(with fileItem: FileItem) {
-        let icon = NSWorkspace.shared.icon(forFile: fileItem.url.path)
-        icon.size = NSSize(width: GroveUI.iconSize, height: GroveUI.iconSize)
-        iconImageView.image = icon
+        iconImageView.image = ThumbnailCache.shared.icon(
+            for: fileItem.url,
+            size: NSSize(width: GroveUI.iconSize, height: GroveUI.iconSize)
+        )
         nameLabel.stringValue = fileItem.name
     }
 

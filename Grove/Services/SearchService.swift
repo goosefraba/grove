@@ -7,11 +7,13 @@ final class SearchService {
 
     private var metadataQuery: NSMetadataQuery?
     private var completion: (([FileItem]) -> Void)?
+    private var searchGeneration: UInt = 0
 
     private init() {}
 
     func search(query: String, in directory: URL, completion: @escaping ([FileItem]) -> Void) {
         stop()
+        searchGeneration += 1
 
         self.completion = completion
 
@@ -35,6 +37,7 @@ final class SearchService {
     }
 
     func stop() {
+        searchGeneration += 1
         if let query = metadataQuery {
             query.stop()
             NotificationCenter.default.removeObserver(self, name: .NSMetadataQueryDidFinishGathering, object: query)
@@ -45,6 +48,7 @@ final class SearchService {
 
     @objc private func queryDidFinish(_ notification: Notification) {
         guard let query = notification.object as? NSMetadataQuery else { return }
+        let generation = searchGeneration
         query.disableUpdates()
 
         var results: [FileItem] = []
@@ -54,7 +58,7 @@ final class SearchService {
                 continue
             }
             let url = URL(fileURLWithPath: path)
-            if let fileItem = FileItem.load(from: url) {
+            if let fileItem = FileItem.load(from: url, includeTags: false) {
                 results.append(fileItem)
             }
         }
@@ -63,7 +67,9 @@ final class SearchService {
 
         let handler = completion
         DispatchQueue.main.async {
+            guard self.searchGeneration == generation else { return }
             handler?(results)
+            self.stop()
         }
     }
 }

@@ -19,6 +19,7 @@ final class GalleryViewController: NSViewController, FileViewControllerProtocol,
 
     private var watcher: DirectoryWatcher?
     private var reloadWorkItem: DispatchWorkItem?
+    private var loadGeneration: UInt = 0
     private var currentPreviewIndex: Int = -1
 
     private var sortKey: String = "name"
@@ -145,6 +146,7 @@ final class GalleryViewController: NSViewController, FileViewControllerProtocol,
     }
 
     func loadDirectory(_ url: URL) {
+        reloadWorkItem?.cancel()
         currentURL = url
 
         watcher?.stop()
@@ -165,53 +167,51 @@ final class GalleryViewController: NSViewController, FileViewControllerProtocol,
     }
 
     private func reloadContents() {
-        do {
-            items = try FileOperationService.shared.contentsOfDirectory(at: currentURL, showHidden: showHiddenFiles)
-            sortItems()
-            filmstripCollectionView.reloadData()
-            updateStatusBar()
-            emptyLabel.stringValue = "This folder is empty"
-            emptyLabel.isHidden = !items.isEmpty
+        loadGeneration += 1
+        let generation = loadGeneration
+        let requestURL = currentURL.standardizedFileURL
+        let requestShowHiddenFiles = showHiddenFiles
+        let selectedURL = selectedItems.first?.url
 
-            if !items.isEmpty {
-                let indexPath = IndexPath(item: 0, section: 0)
-                filmstripCollectionView.selectionIndexPaths = [indexPath]
-                selectPreviewItem(at: 0)
-            } else {
-                previewImageView.image = nil
-                currentPreviewIndex = -1
+        FileOperationService.shared.contentsOfDirectoryAsync(at: requestURL, showHidden: requestShowHiddenFiles) { [weak self] result in
+            guard let self = self,
+                  self.loadGeneration == generation,
+                  self.currentURL.standardizedFileURL == requestURL,
+                  self.showHiddenFiles == requestShowHiddenFiles else { return }
+
+            switch result {
+            case .success(let loadedItems):
+                self.items = FileItem.sorted(loadedItems, key: self.sortKey, ascending: self.sortAscending)
+                self.filmstripCollectionView.reloadData()
+                self.updateStatusBar()
+                self.emptyLabel.stringValue = "This folder is empty"
+                self.emptyLabel.isHidden = !self.items.isEmpty
+
+                if !self.items.isEmpty {
+                    let selectedIndex = selectedURL.flatMap { url in
+                        self.items.firstIndex { $0.url.standardizedFileURL == url.standardizedFileURL }
+                    } ?? 0
+                    let indexPath = IndexPath(item: selectedIndex, section: 0)
+                    self.filmstripCollectionView.selectionIndexPaths = [indexPath]
+                    self.selectPreviewItem(at: selectedIndex)
+                } else {
+                    self.previewImageView.image = nil
+                    self.currentPreviewIndex = -1
+                }
+            case .failure:
+                self.items = []
+                self.filmstripCollectionView.reloadData()
+                self.updateStatusBar()
+                self.previewImageView.image = nil
+                self.currentPreviewIndex = -1
+                self.emptyLabel.stringValue = "Unable to load folder contents."
+                self.emptyLabel.isHidden = false
             }
-        } catch {
-            items = []
-            filmstripCollectionView.reloadData()
-            updateStatusBar()
-            previewImageView.image = nil
-            currentPreviewIndex = -1
-            emptyLabel.stringValue = "Unable to load folder contents."
-            emptyLabel.isHidden = false
         }
     }
 
     private func sortItems() {
-        items.sort { a, b in
-            if a.isDirectory != b.isDirectory {
-                return a.isDirectory
-            }
-            let result: Bool
-            switch sortKey {
-            case "name":
-                result = a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
-            case "date":
-                result = a.dateModified < b.dateModified
-            case "size":
-                result = a.size < b.size
-            case "kind":
-                result = a.kind.localizedCaseInsensitiveCompare(b.kind) == .orderedAscending
-            default:
-                result = a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
-            }
-            return sortAscending ? result : !result
-        }
+        FileItem.sort(&items, key: sortKey, ascending: sortAscending)
     }
 
     func toggleHiddenFiles() {
@@ -236,6 +236,7 @@ final class GalleryViewController: NSViewController, FileViewControllerProtocol,
         guard index >= 0, index < items.count else { return }
         currentPreviewIndex = index
         let item = items[index]
+        let itemURL = item.url
 
         delegate?.fileListDidSelect(items: [item])
 
@@ -249,7 +250,10 @@ final class GalleryViewController: NSViewController, FileViewControllerProtocol,
 
         QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { [weak self] representation, _ in
             DispatchQueue.main.async {
-                guard let self = self, self.currentPreviewIndex == index else { return }
+                guard let self = self,
+                      self.currentPreviewIndex == index,
+                      index < self.items.count,
+                      self.items[index].url.standardizedFileURL == itemURL.standardizedFileURL else { return }
                 if let rep = representation {
                     self.previewImageView.image = rep.nsImage
                 } else {
@@ -372,9 +376,10 @@ final class FilmstripItem: NSCollectionViewItem {
     }
 
     func configure(with fileItem: FileItem) {
-        let icon = NSWorkspace.shared.icon(forFile: fileItem.url.path)
-        icon.size = NSSize(width: 48, height: 48)
-        thumbnailImageView.image = icon
+        thumbnailImageView.image = ThumbnailCache.shared.icon(
+            for: fileItem.url,
+            size: NSSize(width: 48, height: 48)
+        )
     }
 
     override var isSelected: Bool {

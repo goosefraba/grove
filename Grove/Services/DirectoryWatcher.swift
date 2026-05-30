@@ -1,12 +1,15 @@
 import Foundation
 import CoreServices
+import OSLog
 
 final class DirectoryWatcher {
     typealias Callback = ([URL]) -> Void
 
+    private static let logger = Logger(subsystem: "com.goosefraba.grove", category: "DirectoryWatcher")
     private var stream: FSEventStreamRef?
     private let callback: Callback
     private let box = WatcherBox()
+    private let eventQueue = DispatchQueue(label: "com.grove.directorywatcher", qos: .utility)
 
     private final class WatcherBox {
         weak var watcher: DirectoryWatcher?
@@ -28,6 +31,14 @@ final class DirectoryWatcher {
 
         var context = FSEventStreamContext()
         context.info = Unmanaged.passUnretained(box).toOpaque()
+        context.retain = { info in
+            guard let info = info else { return nil }
+            return UnsafeRawPointer(Unmanaged<WatcherBox>.fromOpaque(info).retain().toOpaque())
+        }
+        context.release = { info in
+            guard let info = info else { return }
+            Unmanaged<WatcherBox>.fromOpaque(info).release()
+        }
 
         let flags = UInt32(
             kFSEventStreamCreateFlagUseCFTypes |
@@ -74,10 +85,13 @@ final class DirectoryWatcher {
             FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
             0.5,
             FSEventStreamCreateFlags(flags)
-        ) else { return }
+        ) else {
+            Self.logger.error("Failed to create FSEvents stream for \(url.path, privacy: .public)")
+            return
+        }
 
         self.stream = stream
-        FSEventStreamSetDispatchQueue(stream, DispatchQueue.main)
+        FSEventStreamSetDispatchQueue(stream, eventQueue)
         FSEventStreamStart(stream)
     }
 

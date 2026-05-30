@@ -6,7 +6,14 @@ final class FileProgressViewController: NSViewController {
     private let fileNameLabel = NSTextField(labelWithString: "")
     private let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
 
-    private(set) var isCancelled = false
+    private let cancellationLock = NSLock()
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        cancellationLock.lock()
+        defer { cancellationLock.unlock() }
+        return cancelled
+    }
 
     override func loadView() {
         view = NSView()
@@ -56,7 +63,9 @@ final class FileProgressViewController: NSViewController {
     }
 
     @objc private func cancelClicked(_ sender: Any?) {
-        isCancelled = true
+        cancellationLock.lock()
+        cancelled = true
+        cancellationLock.unlock()
         cancelButton.isEnabled = false
         cancelButton.title = "Cancelling..."
     }

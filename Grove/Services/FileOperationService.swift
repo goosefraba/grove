@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import CommonCrypto
+import OSLog
 
 final class FileOperationService {
 
@@ -17,42 +18,69 @@ final class FileOperationService {
         let canMerge: Bool
     }
 
+    enum TransferUndoBehavior {
+        case none
+        case trashDestination
+        case moveBackToSource
+    }
+
+    struct FileTransferRecord {
+        let sourceURL: URL
+        let destinationURL: URL
+        let undoBehavior: TransferUndoBehavior
+
+        var isUndoable: Bool {
+            undoBehavior != .none
+        }
+    }
+
+    enum FileOperationError: LocalizedError {
+        case invalidFileName(String)
+        case cancelled(records: [FileTransferRecord])
+        case partialFailure(records: [FileTransferRecord], underlying: Error)
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidFileName(let name):
+                return "Invalid file name: \(name)"
+            case .cancelled:
+                return "File operation cancelled."
+            case .partialFailure(_, let underlying):
+                return underlying.localizedDescription
+            }
+        }
+    }
+
     private enum TransferOperation {
         case copy
         case move
     }
 
     static let shared = FileOperationService()
+    private static let logger = Logger(subsystem: "com.goosefraba.grove", category: "FileOperationService")
     private let fileManager = FileManager.default
+    private let directoryQueue = DispatchQueue(label: "com.grove.fileops.directory", qos: .userInitiated)
     private let backgroundQueue = DispatchQueue(label: "com.grove.fileops", qos: .userInitiated, attributes: .concurrent)
 
     private init() {}
 
     func contentsOfDirectory(at url: URL, showHidden: Bool) throws -> [FileItem] {
-        let keys: [URLResourceKey] = [
-            .nameKey, .isDirectoryKey, .isPackageKey, .isHiddenKey,
-            .fileSizeKey, .contentModificationDateKey, .creationDateKey,
-            .localizedTypeDescriptionKey, .contentTypeKey, .tagNamesKey
-        ]
+        let names = try fileManager.contentsOfDirectory(atPath: url.path)
 
-        var options: FileManager.DirectoryEnumerationOptions = [.skipsSubdirectoryDescendants]
-        if !showHidden {
-            options.insert(.skipsHiddenFiles)
+        return names.compactMap { name in
+            let childURL = url.appendingPathComponent(name)
+            guard let item = FileItem.loadForDirectoryListing(from: childURL, name: name, showHidden: showHidden) else {
+                Self.logger.debug("Skipping unreadable item during directory load: \(childURL.path, privacy: .public)")
+                return nil
+            }
+            return item
         }
-
-        let urls = try fileManager.contentsOfDirectory(
-            at: url,
-            includingPropertiesForKeys: keys,
-            options: options
-        )
-
-        return urls.compactMap { FileItem.load(from: $0) }
     }
 
     // MARK: - Async Directory Loading
 
     func contentsOfDirectoryAsync(at url: URL, showHidden: Bool, completion: @escaping (Result<[FileItem], Error>) -> Void) {
-        backgroundQueue.async { [weak self] in
+        directoryQueue.async { [weak self] in
             guard let self = self else { return }
             do {
                 let items = try self.contentsOfDirectory(at: url, showHidden: showHidden)
@@ -119,7 +147,7 @@ final class FileOperationService {
         to destination: URL,
         resolver: (FileConflict) -> ConflictResolution
     ) throws -> [URL] {
-        try transfer(urls, to: destination, operation: .copy, resolver: resolver)
+        try copyResolvingConflictsWithRecords(urls, to: destination, resolver: resolver).map(\.destinationURL)
     }
 
     func moveResolvingConflicts(
@@ -127,11 +155,28 @@ final class FileOperationService {
         to destination: URL,
         resolver: (FileConflict) -> ConflictResolution
     ) throws -> [URL] {
+        try moveResolvingConflictsWithRecords(urls, to: destination, resolver: resolver).map(\.destinationURL)
+    }
+
+    func copyResolvingConflictsWithRecords(
+        _ urls: [URL],
+        to destination: URL,
+        resolver: (FileConflict) -> ConflictResolution
+    ) throws -> [FileTransferRecord] {
+        try transfer(urls, to: destination, operation: .copy, resolver: resolver)
+    }
+
+    func moveResolvingConflictsWithRecords(
+        _ urls: [URL],
+        to destination: URL,
+        resolver: (FileConflict) -> ConflictResolution
+    ) throws -> [FileTransferRecord] {
         try transfer(urls, to: destination, operation: .move, resolver: resolver)
     }
 
     func rename(_ url: URL, to newName: String) throws -> URL {
-        let newURL = url.deletingLastPathComponent().appendingPathComponent(newName)
+        let validName = try validatedFileName(newName)
+        let newURL = url.deletingLastPathComponent().appendingPathComponent(validName)
         try fileManager.moveItem(at: url, to: newURL)
         return newURL
     }
@@ -177,29 +222,41 @@ final class FileOperationService {
     // MARK: - Progress Operations
 
     func copyWithProgress(_ urls: [URL], to destination: URL, progress: @escaping (Double, String) -> Void, cancelled: @escaping () -> Bool) throws -> [URL] {
-        var copiedURLs: [URL] = []
+        var records: [FileTransferRecord] = []
         for (index, url) in urls.enumerated() {
-            if cancelled() { return copiedURLs }
+            if cancelled() {
+                throw FileOperationError.cancelled(records: records)
+            }
             let destURL = uniqueDestination(for: url, in: destination)
             progress(Double(index) / Double(urls.count), url.lastPathComponent)
-            try fileManager.copyItem(at: url, to: destURL)
-            copiedURLs.append(destURL)
+            do {
+                try fileManager.copyItem(at: url, to: destURL)
+            } catch {
+                throw FileOperationError.partialFailure(records: records, underlying: error)
+            }
+            records.append(FileTransferRecord(sourceURL: url, destinationURL: destURL, undoBehavior: .trashDestination))
         }
         progress(1.0, "")
-        return copiedURLs
+        return records.map(\.destinationURL)
     }
 
     func moveWithProgress(_ urls: [URL], to destination: URL, progress: @escaping (Double, String) -> Void, cancelled: @escaping () -> Bool) throws -> [URL] {
-        var movedURLs: [URL] = []
+        var records: [FileTransferRecord] = []
         for (index, url) in urls.enumerated() {
-            if cancelled() { return movedURLs }
+            if cancelled() {
+                throw FileOperationError.cancelled(records: records)
+            }
             let destURL = uniqueDestination(for: url, in: destination)
             progress(Double(index) / Double(urls.count), url.lastPathComponent)
-            try fileManager.moveItem(at: url, to: destURL)
-            movedURLs.append(destURL)
+            do {
+                try fileManager.moveItem(at: url, to: destURL)
+            } catch {
+                throw FileOperationError.partialFailure(records: records, underlying: error)
+            }
+            records.append(FileTransferRecord(sourceURL: url, destinationURL: destURL, undoBehavior: .moveBackToSource))
         }
         progress(1.0, "")
-        return movedURLs
+        return records.map(\.destinationURL)
     }
 
     // MARK: - Helpers
@@ -216,16 +273,18 @@ final class FileOperationService {
         to destination: URL,
         operation: TransferOperation,
         resolver: (FileConflict) -> ConflictResolution
-    ) throws -> [URL] {
-        var resultURLs: [URL] = []
+    ) throws -> [FileTransferRecord] {
+        var records: [FileTransferRecord] = []
 
         for url in urls {
-            if let resultURL = try transfer(url, to: destination, operation: operation, resolver: resolver) {
-                resultURLs.append(resultURL)
+            do {
+                records.append(contentsOf: try transfer(url, to: destination, operation: operation, resolver: resolver))
+            } catch {
+                throw FileOperationError.partialFailure(records: records, underlying: error)
             }
         }
 
-        return resultURLs
+        return records
     }
 
     private func transfer(
@@ -233,16 +292,16 @@ final class FileOperationService {
         to directory: URL,
         operation: TransferOperation,
         resolver: (FileConflict) -> ConflictResolution
-    ) throws -> URL? {
+    ) throws -> [FileTransferRecord] {
         let destinationURL = directory.appendingPathComponent(url.lastPathComponent)
 
         guard fileManager.fileExists(atPath: destinationURL.path) else {
             try performTransfer(url, to: destinationURL, operation: operation)
-            return destinationURL
+            return [transferRecord(sourceURL: url, destinationURL: destinationURL, operation: operation)]
         }
 
         guard url.standardizedFileURL != destinationURL.standardizedFileURL else {
-            return nil
+            return []
         }
 
         let conflict = FileConflict(
@@ -253,24 +312,36 @@ final class FileOperationService {
 
         switch resolver(conflict) {
         case .skip:
-            return nil
+            return []
         case .keepBoth:
             let uniqueURL = uniqueDestination(for: url, in: directory)
             try performTransfer(url, to: uniqueURL, operation: operation)
-            return uniqueURL
+            return [transferRecord(sourceURL: url, destinationURL: uniqueURL, operation: operation)]
         case .replace:
-            try fileManager.removeItem(at: destinationURL)
-            try performTransfer(url, to: destinationURL, operation: operation)
-            return destinationURL
+            try performReplacingTransfer(url, to: destinationURL, operation: operation)
+            return [
+                FileTransferRecord(
+                    sourceURL: url,
+                    destinationURL: destinationURL,
+                    undoBehavior: operation == .move ? .moveBackToSource : .none
+                )
+            ]
         case .merge:
             guard conflict.canMerge else {
                 let uniqueURL = uniqueDestination(for: url, in: directory)
                 try performTransfer(url, to: uniqueURL, operation: operation)
-                return uniqueURL
+                return [transferRecord(sourceURL: url, destinationURL: uniqueURL, operation: operation)]
             }
-            try mergeDirectory(sourceURL: url, into: destinationURL, operation: operation, resolver: resolver)
-            return destinationURL
+            return try mergeDirectory(sourceURL: url, into: destinationURL, operation: operation, resolver: resolver)
         }
+    }
+
+    private func transferRecord(sourceURL: URL, destinationURL: URL, operation: TransferOperation) -> FileTransferRecord {
+        FileTransferRecord(
+            sourceURL: sourceURL,
+            destinationURL: destinationURL,
+            undoBehavior: operation == .copy ? .trashDestination : .moveBackToSource
+        )
     }
 
     private func performTransfer(_ sourceURL: URL, to destinationURL: URL, operation: TransferOperation) throws {
@@ -282,26 +353,54 @@ final class FileOperationService {
         }
     }
 
+    private func performReplacingTransfer(_ sourceURL: URL, to destinationURL: URL, operation: TransferOperation) throws {
+        let backupURL = replacementBackupURL(for: destinationURL)
+
+        try fileManager.moveItem(at: destinationURL, to: backupURL)
+        do {
+            try performTransfer(sourceURL, to: destinationURL, operation: operation)
+            try fileManager.removeItem(at: backupURL)
+        } catch {
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                try? fileManager.removeItem(at: destinationURL)
+            }
+            try? fileManager.moveItem(at: backupURL, to: destinationURL)
+            throw error
+        }
+    }
+
+    private func replacementBackupURL(for destinationURL: URL) -> URL {
+        let directory = destinationURL.deletingLastPathComponent()
+        let base = ".\(destinationURL.lastPathComponent).grove-replace"
+        var backupURL = directory.appendingPathComponent("\(base)-\(UUID().uuidString)")
+        while fileManager.fileExists(atPath: backupURL.path) {
+            backupURL = directory.appendingPathComponent("\(base)-\(UUID().uuidString)")
+        }
+        return backupURL
+    }
+
     private func mergeDirectory(
         sourceURL: URL,
         into destinationURL: URL,
         operation: TransferOperation,
         resolver: (FileConflict) -> ConflictResolution
-    ) throws {
+    ) throws -> [FileTransferRecord] {
         let childURLs = try fileManager.contentsOfDirectory(
             at: sourceURL,
             includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey],
             options: []
         )
 
+        var records: [FileTransferRecord] = []
         for childURL in childURLs {
-            _ = try transfer(childURL, to: destinationURL, operation: operation, resolver: resolver)
+            records.append(contentsOf: try transfer(childURL, to: destinationURL, operation: operation, resolver: resolver))
         }
 
         if operation == .move,
            (try? fileManager.contentsOfDirectory(atPath: sourceURL.path).isEmpty) == true {
             try fileManager.removeItem(at: sourceURL)
         }
+        return records
     }
 
     private func canMergeDirectories(sourceURL: URL, destinationURL: URL) -> Bool {
@@ -326,6 +425,40 @@ final class FileOperationService {
             counter += 1
         }
         return destURL
+    }
+
+    private func validatedFileName(_ name: String) throws -> String {
+        guard !name.isEmpty,
+              name != ".",
+              name != "..",
+              !name.contains("/"),
+              !name.contains("\0") else {
+            throw FileOperationError.invalidFileName(name)
+        }
+        return name
+    }
+
+    func undoTransferRecords(_ records: [FileTransferRecord]) throws {
+        for record in records.reversed() where record.isUndoable {
+            switch record.undoBehavior {
+            case .none:
+                continue
+            case .trashDestination:
+                if fileManager.fileExists(atPath: record.destinationURL.path) {
+                    _ = try moveToTrash([record.destinationURL])
+                }
+            case .moveBackToSource:
+                guard fileManager.fileExists(atPath: record.destinationURL.path) else { continue }
+                let originalDirectory = record.sourceURL.deletingLastPathComponent()
+                try fileManager.createDirectory(at: originalDirectory, withIntermediateDirectories: true)
+                if fileManager.fileExists(atPath: record.sourceURL.path) {
+                    let fallbackURL = uniqueDestination(for: record.sourceURL, in: originalDirectory)
+                    try fileManager.moveItem(at: record.destinationURL, to: fallbackURL)
+                } else {
+                    try fileManager.moveItem(at: record.destinationURL, to: record.sourceURL)
+                }
+            }
+        }
     }
 
     private func archiveExtractionFolderName(for archiveURL: URL) -> String {

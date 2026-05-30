@@ -5,6 +5,15 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="Grove"
 DERIVED_DATA_PATH="$PROJECT_DIR/.derivedData"
 
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  cat <<'EOF'
+Build and launch Grove for local development.
+
+Usage: ./run.sh
+EOF
+  exit 0
+fi
+
 xcodebuild -project "$PROJECT_DIR/$APP_NAME.xcodeproj" \
   -scheme "$APP_NAME" \
   -configuration Debug \

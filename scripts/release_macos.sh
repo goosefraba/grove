@@ -48,11 +48,25 @@ while [[ $# -gt 0 ]]; do
     --notarize)    NOTARIZE=1; shift ;;
     --install)     INSTALL=1; shift ;;
     --launch)      INSTALL=1; LAUNCH_INSTALLED=1; shift ;;
-    --ship)        NOTARIZE=1; INSTALL=1; shift ;;
-    --allow-dirty) ALLOW_DIRTY=1; shift ;;
-    -h|--help)
-      sed -n '4,35p' "$0"
-      exit 0 ;;
+	    --ship)        NOTARIZE=1; INSTALL=1; shift ;;
+	    --allow-dirty) ALLOW_DIRTY=1; shift ;;
+	    -h|--help)
+	      cat <<'EOF'
+Build, sign, optionally notarize, and optionally install Grove.
+
+Usage: ./scripts/release_macos.sh [options]
+
+Options:
+  --check        Run preflight checks only
+  --skip-build   Reuse the existing release build in /tmp/grove-macos-release
+  --notarize     Submit the signed app archive to Apple notarization
+  --install      Install the signed app bundle
+  --launch       Install and launch the signed app bundle
+  --ship         Notarize, staple, package, and install
+  --allow-dirty  Allow releases from a dirty worktree
+  -h, --help     Show this help
+EOF
+	      exit 0 ;;
     *) error "Unknown argument: $1 (use --help)" ;;
   esac
 done
@@ -60,7 +74,7 @@ done
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-for env_file in "$RELEASE_ENV_FILE" "$LOCAL_ENV_FILE" "$SHARED_NOTARY_ENV_FILE"; do
+for env_file in "$SHARED_NOTARY_ENV_FILE" "$RELEASE_ENV_FILE" "$LOCAL_ENV_FILE"; do
   if [[ -f "$env_file" ]]; then
     set -a
     # shellcheck disable=SC1090
@@ -72,7 +86,9 @@ done
 APPLE_TEAM_ID="${APPLE_TEAM_ID:-$TEAM_ID}"
 APP_BUNDLE="$RELEASE_ROOT/${APP_NAME}.app"
 APP_ZIP="$RELEASE_ROOT/${APP_NAME}.app.zip"
+DSYM_ZIP="$RELEASE_ROOT/${APP_NAME}.dSYM.zip"
 BUILT_APP="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION/${APP_NAME}.app"
+BUILT_DSYM="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION/${APP_NAME}.app.dSYM"
 INSTALLED_APP="$INSTALL_ROOT/${APP_NAME}.app"
 
 quit_running_app() {
@@ -212,8 +228,16 @@ codesign --display --entitlements :- "$APP_BUNDLE" >/dev/null 2>&1
 success "Code signature verified"
 
 step "Packaging signed app"
+rm -f "$DSYM_ZIP"
 ditto -c -k --keepParent "$APP_BUNDLE" "$APP_ZIP"
 success "Created $APP_ZIP"
+
+if [[ -d "$BUILT_DSYM" ]]; then
+  ditto -c -k --keepParent "$BUILT_DSYM" "$DSYM_ZIP"
+  success "Created $DSYM_ZIP"
+else
+  warn "Missing dSYM bundle: $BUILT_DSYM"
+fi
 
 if [[ $NOTARIZE -eq 1 ]]; then
   step "Notarizing"
@@ -263,5 +287,6 @@ step "Release artifacts ready"
 cat <<EOF
   App bundle: $APP_BUNDLE
   Zip:        $APP_ZIP
+  Symbols:    $([[ -f "$DSYM_ZIP" ]] && echo "$DSYM_ZIP" || echo "<not available>")
   Installed:  $([[ $INSTALL -eq 1 ]] && echo "$INSTALLED_APP" || echo "<not installed>")
 EOF
