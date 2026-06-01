@@ -54,9 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
 
         let currentWC = currentWindow.windowController as? BrowserWindowController
-        let initialURL = currentWC?.currentURL ?? FileManager.default.homeDirectoryForCurrentUser
+        let initialLocation = currentWC?.currentLocation ?? .local(FileManager.default.homeDirectoryForCurrentUser)
 
-        let wc = BrowserWindowController(initialURL: initialURL)
+        let wc = BrowserWindowController(initialLocation: initialLocation)
         windowControllers.append(wc)
         guard let newWindow = wc.window else { return }
         currentWindow.addTabbedWindow(newWindow, ordered: .above)
@@ -114,9 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @objc func goEnclosingFolder(_ sender: Any?) {
         guard let bc = currentBrowserController else { return }
-        let current = bc.currentURL.standardizedFileURL
-        let parent = current.deletingLastPathComponent().standardizedFileURL
-        guard parent != current else { return }
+        guard let parent = bc.currentLocation.parent else { return }
         bc.navigate(to: parent, addToHistory: true)
     }
 
@@ -200,11 +198,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
              #selector(batchRenameFiles(_:)),
              #selector(openFile(_:)):
             return currentFileListVC != nil
+        case #selector(createNewFolder(_:)):
+            return currentSplitVC?.currentCapabilities.contains(.createFolder) ?? false
+        case #selector(goEnclosingFolder(_:)):
+            return currentBrowserController?.currentLocation.parent != nil
         case #selector(toggleHiddenFiles(_:)):
             let showsHiddenFiles = currentSplitVC?.showsHiddenFiles ?? false
             menuItem.state = showsHiddenFiles ? .on : .off
             menuItem.title = showsHiddenFiles ? "Hide Hidden Files" : "Show Hidden Files"
-            return currentSplitVC != nil
+            return currentSplitVC?.currentCapabilities.contains(.showHiddenFiles) ?? false
+        case #selector(viewAsColumns(_:)),
+             #selector(viewAsIcons(_:)),
+             #selector(viewAsGallery(_:)),
+             #selector(toggleDualPane(_:)):
+            return currentSplitVC?.currentLocation.isLocal ?? false
         default:
             return true
         }

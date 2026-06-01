@@ -2,6 +2,14 @@ import AppKit
 
 protocol SidebarViewControllerDelegate: AnyObject {
     func sidebarDidSelect(url: URL)
+    func sidebarDidSelect(location: StorageLocation)
+}
+
+extension SidebarViewControllerDelegate {
+    func sidebarDidSelect(location: StorageLocation) {
+        guard case .local(let url) = location else { return }
+        sidebarDidSelect(url: url)
+    }
 }
 
 final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NSOutlineViewDelegate {
@@ -56,6 +64,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private func reloadItems() {
         items[.favorites] = SidebarItem.favorites
         items[.locations] = SidebarItem.volumes()
+        items[.cloud] = SidebarItem.cloudItems
     }
 
     private func setupOutlineView() {
@@ -335,7 +344,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             cell.textField?.font = .systemFont(ofSize: GroveUI.sidebarFontSize)
             cell.imageView?.image = NSImage(systemSymbolName: sidebarItem.systemImage, accessibilityDescription: sidebarItem.title)
             cell.imageView?.contentTintColor = .controlAccentColor
-            cell.setAccessibilityLabel("\(sidebarItem.title) - \(sidebarItem.url.path)")
+            cell.setAccessibilityLabel("\(sidebarItem.title) - \(sidebarItem.location.displayName)")
             cell.setAccessibilityIdentifier("sidebar_\(sidebarItem.title)")
             return cell
         }
@@ -347,16 +356,20 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         guard !suppressSelectionCallback else { return }
         let row = outlineView.selectedRow
         guard row >= 0, let item = outlineView.item(atRow: row) as? SidebarItem else { return }
-        delegate?.sidebarDidSelect(url: item.url)
+        delegate?.sidebarDidSelect(location: item.location)
     }
 
     func selectItem(for url: URL) {
+        selectItem(for: .local(url.standardizedFileURL))
+    }
+
+    func selectItem(for location: StorageLocation) {
         suppressSelectionCallback = true
         defer { suppressSelectionCallback = false }
         for section in sections {
             guard let sectionItems = items[section] else { continue }
             for sidebarItem in sectionItems {
-                if sidebarItem.url == url {
+                if sidebarItem.location == location || sidebarItem.representsProvider(of: location) {
                     let row = outlineView.row(forItem: sidebarItem)
                     if row >= 0 {
                         outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)

@@ -7,21 +7,43 @@ extension Notification.Name {
 enum SidebarSection: String, CaseIterable {
     case favorites = "Favorites"
     case locations = "Locations"
+    case cloud = "Cloud"
 }
 
 struct SidebarItem: Hashable {
     let title: String
-    let url: URL
+    let location: StorageLocation
     let systemImage: String
     let section: SidebarSection
     let isBuiltIn: Bool
 
+    var url: URL {
+        location.localURL ?? FileManager.default.homeDirectoryForCurrentUser
+    }
+
     init(title: String, url: URL, systemImage: String, section: SidebarSection, isBuiltIn: Bool = true) {
         self.title = title
-        self.url = url
+        self.location = .local(url.standardizedFileURL)
         self.systemImage = systemImage
         self.section = section
         self.isBuiltIn = isBuiltIn
+    }
+
+    init(title: String, location: StorageLocation, systemImage: String, section: SidebarSection, isBuiltIn: Bool = true) {
+        self.title = title
+        self.location = location
+        self.systemImage = systemImage
+        self.section = section
+        self.isBuiltIn = isBuiltIn
+    }
+
+    func representsProvider(of otherLocation: StorageLocation) -> Bool {
+        switch (location, otherLocation) {
+        case (.s3, .s3):
+            return true
+        default:
+            return false
+        }
     }
 
     static let builtInFavorites: [SidebarItem] = [
@@ -60,6 +82,15 @@ struct SidebarItem: Hashable {
     static var favorites: [SidebarItem] {
         builtInFavorites + customFavorites
     }
+
+    static let cloudItems: [SidebarItem] = [
+        SidebarItem(
+            title: "Amazon S3",
+            location: .s3(S3Location()),
+            systemImage: "cloud",
+            section: .cloud
+        )
+    ]
 
     // MARK: - Custom Favorites Persistence
 

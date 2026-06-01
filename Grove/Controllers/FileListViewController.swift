@@ -81,7 +81,20 @@ private extension NSEvent {
 
 protocol FileListViewControllerDelegate: AnyObject {
     func fileListDidNavigate(to url: URL)
+    func fileListDidNavigate(to location: StorageLocation)
     func fileListDidSelect(items: [FileItem])
+    func fileListDidSelect(browserItems: [BrowserItem])
+}
+
+extension FileListViewControllerDelegate {
+    func fileListDidNavigate(to location: StorageLocation) {
+        guard case .local(let url) = location else { return }
+        fileListDidNavigate(to: url)
+    }
+
+    func fileListDidSelect(browserItems: [BrowserItem]) {
+        fileListDidSelect(items: browserItems.compactMap(\.fileItem))
+    }
 }
 
 final class FileListViewController: NSViewController, FileViewControllerProtocol,

@@ -3,10 +3,11 @@ import AppKit
 final class PathBarView: NSView {
 
     var onPathComponentClicked: ((URL) -> Void)?
+    var onLocationComponentClicked: ((StorageLocation) -> Void)?
 
     private var buttons: [NSButton] = []
     private let stackView = NSStackView()
-    private var currentComponents: [URL] = []
+    private var currentComponents: [StorageBreadcrumb] = []
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -33,11 +34,15 @@ final class PathBarView: NSView {
     }
 
     func update(for url: URL) {
+        update(for: .local(url.standardizedFileURL))
+    }
+
+    func update(for location: StorageLocation) {
         buttons.forEach { $0.removeFromSuperview() }
         buttons.removeAll()
         stackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
-        let components = url.pathComponents_
+        let components = location.breadcrumbs
         currentComponents = components
 
         for (index, component) in components.enumerated() {
@@ -48,13 +53,13 @@ final class PathBarView: NSView {
                 stackView.addArrangedSubview(separator)
             }
 
-            let button = NSButton(title: component.displayName, target: self, action: #selector(pathComponentClicked(_:)))
+            let button = NSButton(title: component.title, target: self, action: #selector(pathComponentClicked(_:)))
             button.bezelStyle = .recessed
             button.isBordered = false
             button.font = .systemFont(ofSize: GroveUI.pathBarFontSize)
             button.tag = index
-            button.toolTip = component.path
-            button.setAccessibilityLabel("Path component: \(component.path)")
+            button.toolTip = component.toolTip
+            button.setAccessibilityLabel("Path component: \(component.toolTip)")
             button.setAccessibilityIdentifier("pathBarComponent_\(index)")
 
             // Navigate on normal click; reserve alternate click for sibling menu.
@@ -67,10 +72,10 @@ final class PathBarView: NSView {
 
     @objc private func pathComponentClicked(_ sender: NSButton) {
         guard sender.tag < currentComponents.count else { return }
-        let clickedURL = currentComponents[sender.tag]
+        let clickedComponent = currentComponents[sender.tag]
 
         guard let event = NSApp.currentEvent else {
-            onPathComponentClicked?(clickedURL)
+            navigate(to: clickedComponent.location)
             return
         }
 
@@ -78,10 +83,20 @@ final class PathBarView: NSView {
             event.type == .rightMouseDown ||
             event.modifierFlags.contains(.control)
 
-        if shouldShowSiblingMenu {
+        if shouldShowSiblingMenu, case .local(let clickedURL) = clickedComponent.location {
             showSiblingMenu(for: clickedURL, relativeTo: sender)
         } else {
-            onPathComponentClicked?(clickedURL)
+            navigate(to: clickedComponent.location)
+        }
+    }
+
+    private func navigate(to location: StorageLocation) {
+        if let onLocationComponentClicked {
+            onLocationComponentClicked(location)
+            return
+        }
+        if case .local(let url) = location {
+            onPathComponentClicked?(url)
         }
     }
 
@@ -145,6 +160,6 @@ final class PathBarView: NSView {
 
     @objc private func siblingMenuItemClicked(_ sender: NSMenuItem) {
         guard let url = sender.representedObject as? URL else { return }
-        onPathComponentClicked?(url)
+        navigate(to: .local(url.standardizedFileURL))
     }
 }

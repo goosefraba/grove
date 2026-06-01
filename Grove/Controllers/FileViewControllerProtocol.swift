@@ -10,10 +10,14 @@ enum ViewMode: Int, CaseIterable {
 protocol FileViewControllerProtocol: AnyObject {
     var delegate: FileListViewControllerDelegate? { get set }
     var currentURL: URL { get }
+    var currentLocation: StorageLocation { get }
     var showHiddenFiles: Bool { get set }
     var selectedItems: [FileItem] { get }
+    var selectedBrowserItems: [BrowserItem] { get }
+    var capabilities: StorageCapabilities { get }
     var supportsToolbarSearch: Bool { get }
     func loadDirectory(_ url: URL)
+    func loadLocation(_ location: StorageLocation)
     func toggleHiddenFiles()
     func setShowsHiddenFiles(_ visible: Bool)
     func createNewFolder()
@@ -36,7 +40,14 @@ enum GroveUI {
 }
 
 extension FileViewControllerProtocol {
+    var currentLocation: StorageLocation { .local(currentURL.standardizedFileURL) }
+    var selectedBrowserItems: [BrowserItem] { selectedItems.map(BrowserItem.local) }
+    var capabilities: StorageCapabilities { currentLocation.capabilities }
     var supportsToolbarSearch: Bool { false }
+    func loadLocation(_ location: StorageLocation) {
+        guard case .local(let url) = location else { return }
+        loadDirectory(url)
+    }
     func setShowsHiddenFiles(_ visible: Bool) {
         guard showHiddenFiles != visible else { return }
         toggleHiddenFiles()

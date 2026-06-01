@@ -204,6 +204,7 @@ if [[ $SKIP_BUILD -eq 0 ]]; then
     -configuration "$CONFIGURATION" \
     -derivedDataPath "$DERIVED_DATA_PATH" \
     -destination "platform=macOS" \
+    -skipPackagePluginValidation \
     CODE_SIGNING_ALLOWED=NO \
     build
 else

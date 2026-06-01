@@ -25,7 +25,7 @@ final class BrowserWindow: NSWindow, NSDraggingDestination {
     }
 }
 
-final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSearchFieldDelegate {
+final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSearchFieldDelegate, NSMenuItemValidation {
 
     private let splitVC = MainSplitViewController()
     private var history: NavigationHistory
@@ -36,7 +36,9 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
     private var backButton: NSToolbarItem?
     private var forwardButton: NSToolbarItem?
     private var hiddenFilesItem: NSToolbarItem?
+    private var newFolderItem: NSToolbarItem?
 
+    var currentLocation: StorageLocation { history.currentLocation }
     var currentURL: URL { history.currentURL }
 
     // Toolbar identifiers
@@ -53,8 +55,12 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
         self.init(initialURL: initialURL)
     }
 
-    init(initialURL: URL) {
-        history = NavigationHistory(initialURL: initialURL)
+    convenience init(initialURL: URL) {
+        self.init(initialLocation: .local(initialURL.standardizedFileURL))
+    }
+
+    init(initialLocation: StorageLocation) {
+        self.history = NavigationHistory(initialLocation: initialLocation)
 
         let window = BrowserWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
@@ -63,8 +69,8 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
             defer: false
         )
         window.minSize = NSSize(width: 600, height: 400)
-        window.title = initialURL.displayName
-        window.tab.title = initialURL.displayName
+        window.title = initialLocation.displayName
+        window.tab.title = initialLocation.displayName
         window.tabbingMode = .preferred
         window.tabbingIdentifier = "com.grove.browser"
         window.titleVisibility = .visible
@@ -82,7 +88,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
         setupToolbar()
         setupPathBar()
         setupSearchField()
-        navigate(to: initialURL, addToHistory: false)
+        navigate(to: initialLocation, addToHistory: false)
     }
 
     required init?(coder: NSCoder) {
@@ -98,8 +104,8 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
     }
 
     private func setupPathBar() {
-        pathBar.onPathComponentClicked = { [weak self] url in
-            self?.navigate(to: url, addToHistory: true)
+        pathBar.onLocationComponentClicked = { [weak self] location in
+            self?.navigate(to: location, addToHistory: true)
         }
     }
 
@@ -114,27 +120,32 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
     // MARK: - Navigation
 
     func navigate(to url: URL, addToHistory: Bool) {
+        navigate(to: .local(url.standardizedFileURL), addToHistory: addToHistory)
+    }
+
+    func navigate(to location: StorageLocation, addToHistory: Bool) {
         if addToHistory {
-            history.navigateTo(url)
+            history.navigateTo(location)
         }
         searchField.stringValue = ""
         splitVC.clearToolbarSearch()
-        splitVC.navigate(to: url)
-        pathBar.update(for: url)
-        window?.title = url.displayName
-        window?.tab.title = url.displayName
+        splitVC.navigate(to: location)
+        pathBar.update(for: location)
+        window?.title = location.displayName
+        window?.tab.title = location.displayName
         updateNavigationButtons()
+        updateToolbarActionAvailability()
         updateSearchFieldAvailability()
     }
 
     @objc func goBack(_ sender: Any?) {
-        guard let url = history.goBack() else { return }
-        navigate(to: url, addToHistory: false)
+        guard let location = history.goBackLocation() else { return }
+        navigate(to: location, addToHistory: false)
     }
 
     @objc func goForward(_ sender: Any?) {
-        guard let url = history.goForward() else { return }
-        navigate(to: url, addToHistory: false)
+        guard let location = history.goForwardLocation() else { return }
+        navigate(to: location, addToHistory: false)
     }
 
     private func updateNavigationButtons() {
@@ -172,6 +183,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
     func saveState() -> [String: Any] {
         var state: [String: Any] = [:]
         state["currentURL"] = currentURL.path
+        state["currentLocation"] = currentLocation.propertyListRepresentation
         state["viewMode"] = splitVC.currentViewMode.rawValue
         state["previewPaneVisible"] = splitVC.isPreviewPaneVisible
         state["dualPaneVisible"] = splitVC.isDualPaneVisible
@@ -185,15 +197,23 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
     }
 
     static func restoreState(from dict: [String: Any]) -> BrowserWindowController? {
-        guard let path = dict["currentURL"] as? String else { return nil }
-        let url = URL(fileURLWithPath: path)
-
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else {
+        let location: StorageLocation
+        if let restored = StorageLocation.fromPropertyList(dict["currentLocation"]) {
+            location = restored
+        } else if let path = dict["currentURL"] as? String {
+            location = .local(URL(fileURLWithPath: path).standardizedFileURL)
+        } else {
             return nil
         }
 
-        let wc = BrowserWindowController(initialURL: url)
+        if case .local(let url) = location {
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else {
+                return nil
+            }
+        }
+
+        let wc = BrowserWindowController(initialLocation: location)
 
         if let frameString = dict["windowFrame"] as? String {
             let frame = NSRectFromString(frameString)
@@ -324,6 +344,8 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
             item.target = self
             item.action = #selector(createNewFolder(_:))
             item.toolTip = "Create new folder"
+            newFolderItem = item
+            updateToolbarActionAvailability()
             return item
 
         default:
@@ -355,12 +377,33 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
     }
 
     @objc func createNewFolder(_ sender: Any?) {
+        guard splitVC.currentCapabilities.contains(.createFolder) else { return }
         splitVC.createNewFolder()
     }
 
     @objc func toggleHiddenFiles(_ sender: Any?) {
         splitVC.toggleHiddenFiles()
         updateHiddenFilesButtonState()
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(createNewFolder(_:)):
+            return splitVC.currentCapabilities.contains(.createFolder)
+        case #selector(toggleHiddenFiles(_:)):
+            let showsHidden = splitVC.showsHiddenFiles
+            menuItem.state = showsHidden ? .on : .off
+            menuItem.title = showsHidden ? "Hide Hidden Files" : "Show Hidden Files"
+            return splitVC.currentCapabilities.contains(.showHiddenFiles)
+        case #selector(goToFolder(_:)):
+            return splitVC.currentLocation.isLocal
+        case #selector(goBack(_:)):
+            return history.canGoBack
+        case #selector(goForward(_:)):
+            return history.canGoForward
+        default:
+            return true
+        }
     }
 
     func setShowsHiddenFiles(_ visible: Bool) {
@@ -377,6 +420,12 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
         hiddenFilesItem?.label = showsHidden ? "Hide Hidden" : "Show Hidden"
         hiddenFilesItem?.paletteLabel = showsHidden ? "Hide Hidden Files" : "Show Hidden Files"
         hiddenFilesItem?.toolTip = showsHidden ? "Hide hidden files" : "Show hidden files"
+        hiddenFilesItem?.isEnabled = splitVC.currentCapabilities.contains(.showHiddenFiles)
+    }
+
+    private func updateToolbarActionAvailability() {
+        newFolderItem?.isEnabled = splitVC.currentCapabilities.contains(.createFolder)
+        hiddenFilesItem?.isEnabled = splitVC.currentCapabilities.contains(.showHiddenFiles)
     }
 
     @objc override func newWindowForTab(_ sender: Any?) {
@@ -421,13 +470,19 @@ extension BrowserWindowController: MainSplitViewControllerDelegate {
         navigate(to: url, addToHistory: true)
     }
 
+    func splitViewDidNavigate(to location: StorageLocation) {
+        navigate(to: location, addToHistory: true)
+    }
+
     func splitViewSearchSupportDidChange() {
         updateSearchFieldAvailability()
+        updateToolbarActionAvailability()
     }
 }
 
 extension BrowserWindowController: BrowserWindowFileDropDelegate {
     func browserWindow(_ window: BrowserWindow, validateFileDropWith info: any NSDraggingInfo) -> NSDragOperation {
+        guard case .local = currentLocation else { return [] }
         guard isFileDropInTabArea(info, of: window),
               info.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) else {
             return []
@@ -436,6 +491,7 @@ extension BrowserWindowController: BrowserWindowFileDropDelegate {
     }
 
     func browserWindow(_ window: BrowserWindow, acceptFileDropWith info: any NSDraggingInfo) -> Bool {
+        guard case .local(let destination) = currentLocation else { return false }
         guard isFileDropInTabArea(info, of: window),
               let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
               !urls.isEmpty else {
@@ -443,7 +499,7 @@ extension BrowserWindowController: BrowserWindowFileDropDelegate {
         }
 
         let isMove = info.draggingSourceOperationMask.contains(.move)
-        return transferDroppedFiles(urls, to: currentURL, isMove: isMove)
+        return transferDroppedFiles(urls, to: destination, isMove: isMove)
     }
 
     private func isFileDropInTabArea(_ info: any NSDraggingInfo, of window: BrowserWindow) -> Bool {

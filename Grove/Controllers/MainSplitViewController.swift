@@ -2,7 +2,15 @@ import AppKit
 
 protocol MainSplitViewControllerDelegate: AnyObject {
     func splitViewDidNavigate(to url: URL)
+    func splitViewDidNavigate(to location: StorageLocation)
     func splitViewSearchSupportDidChange()
+}
+
+extension MainSplitViewControllerDelegate {
+    func splitViewDidNavigate(to location: StorageLocation) {
+        guard case .local(let url) = location else { return }
+        splitViewDidNavigate(to: url)
+    }
 }
 
 final class MainSplitViewController: NSSplitViewController {
@@ -20,6 +28,10 @@ final class MainSplitViewController: NSSplitViewController {
 
     private(set) var currentViewMode: ViewMode = .list
     private var currentContentVC: (NSViewController & FileViewControllerProtocol)?
+    private var s3BrowserVC: S3BrowserViewController?
+    private(set) var currentLocation: StorageLocation = .local(FileManager.default.homeDirectoryForCurrentUser)
+    private var lastLocalViewMode: ViewMode = .list
+    private var lastLocalShowsHiddenFiles: Bool = false
 
     private var dualPaneVC: DualPaneViewController?
     private var isDualPaneActive: Bool = false
@@ -58,12 +70,35 @@ final class MainSplitViewController: NSSplitViewController {
     }
 
     func navigate(to url: URL) {
-        if isDualPaneActive {
-            dualPaneVC?.loadDirectory(url)
-        } else {
-            currentContentVC?.loadDirectory(url)
+        navigate(to: .local(url.standardizedFileURL))
+    }
+
+    func navigate(to location: StorageLocation) {
+        let previousLocation = currentLocation
+        currentLocation = location
+        switch location {
+        case .local:
+            ensureLocalContentController()
+        case .s3:
+            if previousLocation.isLocal {
+                lastLocalViewMode = currentViewMode
+                lastLocalShowsHiddenFiles = currentContentVC?.showHiddenFiles ?? false
+            }
+            ensureS3ContentController()
         }
-        sidebarVC.selectItem(for: url)
+
+        if isDualPaneActive {
+            if case .local(let url) = location {
+                dualPaneVC?.loadDirectory(url)
+            } else {
+                deactivateDualPane()
+                currentContentVC?.loadLocation(location)
+            }
+        } else {
+            currentContentVC?.loadLocation(location)
+        }
+        sidebarVC.selectItem(for: location)
+        navigationDelegate?.splitViewSearchSupportDidChange()
     }
 
     func toggleInspector() {
@@ -128,6 +163,10 @@ final class MainSplitViewController: NSSplitViewController {
         !isDualPaneActive && (currentContentVC?.supportsToolbarSearch ?? false)
     }
 
+    var currentCapabilities: StorageCapabilities {
+        currentLocation.capabilities
+    }
+
     var activeFileListViewController: FileListViewController? {
         guard !isDualPaneActive else { return nil }
         return currentContentVC as? FileListViewController
@@ -149,6 +188,7 @@ final class MainSplitViewController: NSSplitViewController {
     }
 
     func createNewFolder() {
+        guard currentCapabilities.contains(.createFolder) else { return }
         if isDualPaneActive {
             dualPaneVC?.createNewFolder()
         } else {
@@ -159,8 +199,10 @@ final class MainSplitViewController: NSSplitViewController {
     // MARK: - View Mode Switching
 
     func switchViewMode(_ mode: ViewMode) {
+        guard currentLocation.isLocal else { return }
         guard mode != currentViewMode || isDualPaneActive else { return }
 
+        lastLocalViewMode = mode
         if isDualPaneActive {
             deactivateDualPane()
         }
@@ -211,6 +253,7 @@ final class MainSplitViewController: NSSplitViewController {
     // MARK: - Dual Pane
 
     func toggleDualPane() {
+        guard currentLocation.isLocal else { return }
         if isDualPaneActive {
             deactivateDualPane()
         } else {
@@ -270,13 +313,78 @@ final class MainSplitViewController: NSSplitViewController {
     // MARK: - Hidden Files Toggle forwarding
 
     func toggleHiddenFiles() {
+        guard currentCapabilities.contains(.showHiddenFiles) else { return }
         setShowsHiddenFiles(!showsHiddenFiles)
+    }
+
+    private func ensureLocalContentController() {
+        if isDualPaneActive { return }
+        if currentContentVC is S3BrowserViewController {
+            removeSplitViewItem(contentItem)
+            let vc = localController(for: lastLocalViewMode, showHidden: lastLocalShowsHiddenFiles)
+            contentItem = NSSplitViewItem(viewController: vc)
+            contentItem.minimumThickness = 300
+            insertSplitViewItem(contentItem, at: 1)
+            currentContentVC = vc
+            currentViewMode = lastLocalViewMode
+            if let listVC = vc as? FileListViewController {
+                fileListVC = listVC
+            }
+        }
+    }
+
+    private func ensureS3ContentController() {
+        if isDualPaneActive {
+            deactivateDualPane()
+        }
+        guard !(currentContentVC is S3BrowserViewController) else { return }
+        removeSplitViewItem(contentItem)
+        let vc = s3BrowserVC ?? S3BrowserViewController()
+        vc.delegate = self
+        s3BrowserVC = vc
+        contentItem = NSSplitViewItem(viewController: vc)
+        contentItem.minimumThickness = 300
+        insertSplitViewItem(contentItem, at: 1)
+        currentContentVC = vc
+        currentViewMode = .list
+    }
+
+    private func localController(for mode: ViewMode, showHidden: Bool) -> NSViewController & FileViewControllerProtocol {
+        let vc: NSViewController & FileViewControllerProtocol
+        switch mode {
+        case .list:
+            let list = FileListViewController()
+            list.delegate = self
+            list.showHiddenFiles = showHidden
+            fileListVC = list
+            vc = list
+        case .columns:
+            let columns = ColumnViewController()
+            columns.delegate = self
+            columns.showHiddenFiles = showHidden
+            vc = columns
+        case .icons:
+            let icons = IconViewController()
+            icons.delegate = self
+            icons.showHiddenFiles = showHidden
+            vc = icons
+        case .gallery:
+            let gallery = GalleryViewController()
+            gallery.delegate = self
+            gallery.showHiddenFiles = showHidden
+            vc = gallery
+        }
+        return vc
     }
 }
 
 extension MainSplitViewController: SidebarViewControllerDelegate {
     func sidebarDidSelect(url: URL) {
         navigationDelegate?.splitViewDidNavigate(to: url)
+    }
+
+    func sidebarDidSelect(location: StorageLocation) {
+        navigationDelegate?.splitViewDidNavigate(to: location)
     }
 }
 
@@ -285,8 +393,18 @@ extension MainSplitViewController: FileListViewControllerDelegate {
         navigationDelegate?.splitViewDidNavigate(to: url)
     }
 
+    func fileListDidNavigate(to location: StorageLocation) {
+        navigationDelegate?.splitViewDidNavigate(to: location)
+    }
+
     func fileListDidSelect(items: [FileItem]) {
-        inspectorVC.updateSelection(items)
+        inspectorVC.updateSelection(items.map(BrowserItem.local))
         previewPaneVC.updateSelection(items.first)
+    }
+
+    func fileListDidSelect(browserItems: [BrowserItem]) {
+        inspectorVC.updateSelection(browserItems)
+        let localItems = browserItems.compactMap(\.fileItem)
+        previewPaneVC.updateSelection(localItems.first)
     }
 }

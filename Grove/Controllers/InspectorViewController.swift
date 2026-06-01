@@ -4,7 +4,7 @@ import SwiftUI
 final class InspectorViewController: NSViewController {
 
     private var hostingView: NSHostingView<InspectorView>?
-    private var currentItems: [FileItem] = []
+    private var currentItems: [BrowserItem] = []
 
     override func loadView() {
         let inspectorView = InspectorView(items: [])
@@ -15,6 +15,10 @@ final class InspectorViewController: NSViewController {
     }
 
     func updateSelection(_ items: [FileItem]) {
+        updateSelection(items.map(BrowserItem.local))
+    }
+
+    func updateSelection(_ items: [BrowserItem]) {
         currentItems = items
         let inspectorView = InspectorView(items: items)
         hostingView?.rootView = inspectorView
