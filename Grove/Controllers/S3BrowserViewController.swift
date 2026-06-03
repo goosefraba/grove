@@ -1,5 +1,39 @@
 import AppKit
 
+private final class S3DropScrollView: NSScrollView {
+    var onValidateBackgroundDrop: ((any NSDraggingInfo) -> NSDragOperation)?
+    var onAcceptBackgroundDrop: ((any NSDraggingInfo) -> Bool)?
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        onValidateBackgroundDrop?(sender) ?? []
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        onValidateBackgroundDrop?(sender) ?? []
+    }
+
+    override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        (onValidateBackgroundDrop?(sender) ?? []).isEmpty == false
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        onAcceptBackgroundDrop?(sender) ?? false
+    }
+}
+
+enum S3ContextMenuCommand: Equatable {
+    case openPrefix
+    case uploadFiles
+    case download
+    case copyURI
+}
+
+struct S3ContextMenuItemDescriptor: Equatable {
+    let title: String
+    let command: S3ContextMenuCommand?
+    let isEnabled: Bool
+}
+
 final class S3BrowserViewController: NSViewController, FileViewControllerProtocol, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate, NSComboBoxDelegate {
     weak var delegate: FileListViewControllerDelegate?
 
@@ -8,16 +42,20 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
 
     private let rootStack = NSStackView()
     private let controlsStack = NSStackView()
+    private let headerTitleLabel = NSTextField(labelWithString: "Amazon S3")
+    private let locationSummaryLabel = NSTextField(labelWithString: "")
     private let profileComboBox = NSComboBox()
     private let regionComboBox = NSComboBox()
     private let bucketField = NSTextField()
     private let browseButton = NSButton(title: "Open", target: nil, action: nil)
+    private let uploadButton = NSButton(title: "Upload...", target: nil, action: nil)
+    private let downloadButton = NSButton(title: "Download...", target: nil, action: nil)
     private let retryButton = NSButton(title: "Retry", target: nil, action: nil)
     private let detailsButton = NSButton(title: "Details", target: nil, action: nil)
     private let statusLabel = NSTextField(labelWithString: "")
     private let loadingSpinner = NSProgressIndicator()
     private let tableView = NSTableView()
-    private let scrollView = NSScrollView()
+    private let scrollView = S3DropScrollView()
     private let loadMoreButton = NSButton(title: "Load More", target: nil, action: nil)
     private let emptyLabel = NSTextField(labelWithString: "")
 
@@ -25,10 +63,12 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
     private var items: [S3Item] = []
     private var loadTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
+    private var transferTask: Task<Void, Never>?
     private let staleLoadGuard = StaleLoadGuard()
     private var lastError: S3BrowserError?
     private var nextContinuationToken: String?
     private var suppressControlActions = false
+    private var isLoading = false
 
     private(set) var s3Location = S3Location()
     private let nameColumn = NSUserInterfaceItemIdentifier("S3NameColumn")
@@ -49,6 +89,7 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
     deinit {
         loadTask?.cancel()
         metadataTask?.cancel()
+        transferTask?.cancel()
     }
 
     var currentURL: URL { FileManager.default.homeDirectoryForCurrentUser }
@@ -63,7 +104,7 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
             row < items.count ? .s3(items[row]) : nil
         }
     }
-    var capabilities: StorageCapabilities { .s3ReadOnly }
+    var capabilities: StorageCapabilities { .s3Browser }
     var supportsToolbarSearch: Bool { false }
 
     override func loadView() {
@@ -77,8 +118,9 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         setupTable()
         setupLayout()
         setupAccessibility()
-        reloadProfiles()
-        renderIdleState()
+        if reloadProfiles() {
+            renderIdleState()
+        }
     }
 
     func loadDirectory(_ url: URL) {}
@@ -120,6 +162,14 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         controlsStack.detachesHiddenViews = true
         controlsStack.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 0, right: 10)
 
+        headerTitleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        headerTitleLabel.textColor = .labelColor
+        headerTitleLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        locationSummaryLabel.font = .systemFont(ofSize: GroveUI.statusFontSize)
+        locationSummaryLabel.textColor = .secondaryLabelColor
+        locationSummaryLabel.lineBreakMode = .byTruncatingMiddle
+
         profileComboBox.completes = true
         profileComboBox.numberOfVisibleItems = 12
         profileComboBox.font = .systemFont(ofSize: GroveUI.contentFontSize)
@@ -145,6 +195,20 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         browseButton.target = self
         browseButton.action = #selector(browseRequested(_:))
         browseButton.bezelStyle = .rounded
+        browseButton.image = NSImage(systemSymbolName: "arrow.forward.circle", accessibilityDescription: "Open")
+        browseButton.imagePosition = .imageLeading
+
+        uploadButton.target = self
+        uploadButton.action = #selector(uploadRequested(_:))
+        uploadButton.bezelStyle = .rounded
+        uploadButton.image = NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: "Upload")
+        uploadButton.imagePosition = .imageLeading
+
+        downloadButton.target = self
+        downloadButton.action = #selector(downloadRequested(_:))
+        downloadButton.bezelStyle = .rounded
+        downloadButton.image = NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Download")
+        downloadButton.imagePosition = .imageLeading
 
         retryButton.target = self
         retryButton.action = #selector(retryRequested(_:))
@@ -164,20 +228,36 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         loadingSpinner.controlSize = .small
         loadingSpinner.isDisplayedWhenStopped = false
 
-        let profileRow = makeControlRow()
-        profileRow.addArrangedSubview(makeControlLabel("Profile"))
-        profileRow.addArrangedSubview(profileComboBox)
-        profileRow.addArrangedSubview(makeControlLabel("Region"))
-        profileRow.addArrangedSubview(regionComboBox)
-        profileRow.addArrangedSubview(makeControlLabel("Open bucket"))
-        profileRow.addArrangedSubview(bucketField)
-        profileRow.addArrangedSubview(browseButton)
-        profileRow.addArrangedSubview(retryButton)
-        profileRow.addArrangedSubview(detailsButton)
-        profileRow.addArrangedSubview(loadingSpinner)
-        profileRow.addArrangedSubview(makeFlexibleSpacer())
+        let titleTextStack = NSStackView()
+        titleTextStack.orientation = .vertical
+        titleTextStack.alignment = .leading
+        titleTextStack.spacing = 1
+        titleTextStack.addArrangedSubview(headerTitleLabel)
+        titleTextStack.addArrangedSubview(locationSummaryLabel)
 
-        controlsStack.addArrangedSubview(profileRow)
+        let titleRow = makeControlRow()
+        titleRow.addArrangedSubview(titleTextStack)
+        titleRow.addArrangedSubview(makeFlexibleSpacer())
+        titleRow.addArrangedSubview(retryButton)
+        titleRow.addArrangedSubview(detailsButton)
+        titleRow.addArrangedSubview(loadingSpinner)
+
+        let selectionRow = makeControlRow()
+        selectionRow.spacing = 10
+        selectionRow.addArrangedSubview(makeLabeledControl("Profile", control: profileComboBox))
+        selectionRow.addArrangedSubview(makeLabeledControl("Region", control: regionComboBox))
+        selectionRow.addArrangedSubview(makeFlexibleSpacer())
+
+        let bucketRow = makeControlRow()
+        bucketRow.addArrangedSubview(makeLabeledControl("Bucket", control: bucketField))
+        bucketRow.addArrangedSubview(browseButton)
+        bucketRow.addArrangedSubview(uploadButton)
+        bucketRow.addArrangedSubview(downloadButton)
+        bucketRow.addArrangedSubview(makeFlexibleSpacer())
+
+        controlsStack.addArrangedSubview(titleRow)
+        controlsStack.addArrangedSubview(selectionRow)
+        controlsStack.addArrangedSubview(bucketRow)
     }
 
     private func makeControlRow() -> NSStackView {
@@ -196,6 +276,16 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         label.textColor = .secondaryLabelColor
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
         return label
+    }
+
+    private func makeLabeledControl(_ title: String, control: NSView) -> NSStackView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 2
+        stack.addArrangedSubview(makeControlLabel(title))
+        stack.addArrangedSubview(control)
+        return stack
     }
 
     private func makeFlexibleSpacer() -> NSView {
@@ -238,6 +328,7 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         tableView.rowHeight = GroveUI.listRowHeight
         tableView.doubleAction = #selector(tableDoubleClicked(_:))
         tableView.target = self
+        tableView.registerForDraggedTypes([.fileURL])
 
         let menu = NSMenu()
         menu.delegate = self
@@ -246,6 +337,13 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
         scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.registerForDraggedTypes([.fileURL])
+        scrollView.onValidateBackgroundDrop = { [weak self] info in
+            self?.validateS3FileDrop(info) ?? []
+        }
+        scrollView.onAcceptBackgroundDrop = { [weak self] info in
+            self?.acceptS3FileDrop(info) ?? false
+        }
 
         emptyLabel.font = .systemFont(ofSize: GroveUI.emptyFontSize)
         emptyLabel.textColor = .secondaryLabelColor
@@ -291,19 +389,24 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         regionComboBox.setAccessibilityIdentifier("s3RegionComboBox")
         bucketField.setAccessibilityIdentifier("s3BucketField")
         browseButton.setAccessibilityIdentifier("s3BrowseButton")
+        uploadButton.setAccessibilityIdentifier("s3UploadButton")
+        downloadButton.setAccessibilityIdentifier("s3DownloadButton")
         tableView.setAccessibilityIdentifier("s3ObjectTable")
         statusLabel.setAccessibilityIdentifier("s3StatusLabel")
+        locationSummaryLabel.setAccessibilityIdentifier("s3LocationSummaryLabel")
     }
 
-    private func reloadProfiles() {
+    @discardableResult
+    private func reloadProfiles() -> Bool {
         profiles = profileStore.profiles()
         profileComboBox.removeAllItems()
         profileComboBox.addItems(withObjectValues: profiles.map(\.name))
 
         if profiles.isEmpty {
             browseButton.isEnabled = false
+            updateActionAvailability()
             showInlineError(.noProfiles)
-            return
+            return false
         }
 
         browseButton.isEnabled = true
@@ -315,6 +418,9 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         if regionComboBox.stringValue.isEmpty {
             regionComboBox.stringValue = selectedProfile?.regionHint ?? Self.defaultRegion
         }
+        updateLocationSummary()
+        updateActionAvailability()
+        return true
     }
 
     private func syncControlsFromLocation() {
@@ -329,6 +435,8 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         let profileRegion = selectedProfile?.regionHint
         regionComboBox.stringValue = s3Location.regionOverride ?? profileRegion ?? Self.defaultRegion
         bucketField.stringValue = s3Location.bucket ?? ""
+        updateLocationSummary()
+        updateActionAvailability()
     }
 
     @objc private func profileChanged(_ sender: Any?) {
@@ -411,6 +519,201 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         }
     }
 
+    @objc private func uploadRequested(_ sender: Any?) {
+        guard S3TransferValidator.canUpload(to: s3Location) else {
+            showInlineError(.permission("Open a concrete S3 bucket or prefix before uploading."))
+            return
+        }
+
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.canCreateDirectories = false
+        panel.prompt = "Upload"
+        runPanel(panel) { [weak self] response in
+            guard response == .OK, let self else { return }
+            self.promptForStorageClass { [weak self] storageClass in
+                guard let self, let storageClass else { return }
+                self.performUpload(fileURLs: panel.urls, storageClass: storageClass)
+            }
+        }
+    }
+
+    @objc private func downloadRequested(_ sender: Any?) {
+        let selected = selectedBrowserItems.compactMap(\.s3Item)
+        if let rejection = S3TransferValidator.downloadRejectionReason(for: selected) {
+            showInlineError(.permission(rejection))
+            return
+        }
+
+        if selected.count == 1, let item = selected.first {
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = item.name
+            panel.canCreateDirectories = true
+            panel.prompt = "Download"
+            runPanel(panel) { [weak self] response in
+                guard response == .OK, let url = panel.url else { return }
+                self?.performDownload(items: selected, destination: .file(url))
+            }
+        } else {
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.canCreateDirectories = true
+            panel.prompt = "Choose"
+            panel.message = "Choose a destination folder."
+            runPanel(panel) { [weak self] response in
+                guard response == .OK, let url = panel.url else { return }
+                self?.performDownload(items: selected, destination: .directory(url))
+            }
+        }
+    }
+
+    private func runPanel(_ panel: NSSavePanel, completion: @escaping (NSApplication.ModalResponse) -> Void) {
+        if let window = view.window {
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            completion(panel.runModal())
+        }
+    }
+
+    private func promptForStorageClass(completion: @escaping (S3StorageClass?) -> Void) {
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 260, height: 26), pullsDown: false)
+        for storageClass in S3StorageClass.allCases {
+            popup.addItem(withTitle: storageClass.displayName)
+            popup.lastItem?.representedObject = storageClass.rawValue
+        }
+        popup.selectItem(withTitle: S3StorageClass.standard.displayName)
+
+        let alert = NSAlert()
+        alert.messageText = "Upload to S3"
+        alert.informativeText = "Choose the storage class for new objects."
+        alert.accessoryView = popup
+        alert.addButton(withTitle: "Upload")
+        alert.addButton(withTitle: "Cancel")
+
+        let finish: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .alertFirstButtonReturn else {
+                completion(nil)
+                return
+            }
+            let rawValue = popup.selectedItem?.representedObject as? String
+            completion(rawValue.flatMap(S3StorageClass.init(rawValue:)) ?? .standard)
+        }
+
+        if let window = view.window {
+            alert.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            finish(alert.runModal())
+        }
+    }
+
+    private func performUpload(fileURLs: [URL], storageClass: S3StorageClass) {
+        guard let profile = selectedProfile else {
+            showInlineError(.noProfileSelected)
+            return
+        }
+        if let rejection = S3TransferValidator.uploadRejectionReason(localFileURLs: fileURLs, to: s3Location) {
+            showInlineError(.permission(rejection))
+            return
+        }
+
+        let progressVC = FileProgressViewController()
+        progressVC.configure(operationVerb: "Uploading")
+        presentAsSheet(progressVC)
+        setTransferInProgress(true, message: "Uploading to \(s3Location.bucket ?? "S3")...")
+
+        let task = Task { [weak self, profile, location = s3Location] in
+            guard let self else { return }
+            do {
+                let results = try await self.service.upload(
+                    localFileURLs: fileURLs,
+                    to: location,
+                    profile: profile,
+                    storageClass: storageClass
+                ) { progress in
+                    Task { @MainActor in
+                        progressVC.updateProgress(progress.fractionCompleted ?? 0, fileName: progress.fileName)
+                    }
+                }
+                await MainActor.run {
+                    self.dismiss(progressVC)
+                    self.transferTask = nil
+                    self.setTransferInProgress(false, message: "Uploaded \(results.count) \(results.count == 1 ? "object" : "objects").")
+                    self.loadPrefix(resetItems: true)
+                }
+            } catch {
+                let classified = S3BrowserError.classify(error, bucket: location.bucket, requestedRegion: location.regionOverride)
+                await MainActor.run {
+                    self.dismiss(progressVC)
+                    self.transferTask = nil
+                    self.setTransferInProgress(false, message: nil)
+                    self.showInlineError(classified)
+                }
+            }
+        }
+        transferTask = task
+        progressVC.onCancel = { task.cancel() }
+        updateActionAvailability()
+    }
+
+    private func performDownload(items: [S3Item], destination: S3DownloadDestination) {
+        guard let profile = selectedProfile else {
+            showInlineError(.noProfileSelected)
+            return
+        }
+
+        let progressVC = FileProgressViewController()
+        progressVC.configure(operationVerb: "Downloading")
+        presentAsSheet(progressVC)
+        setTransferInProgress(true, message: "Downloading \(items.count) \(items.count == 1 ? "object" : "objects")...")
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let results = try await self.service.download(
+                    items: items,
+                    to: destination,
+                    profile: profile
+                ) { progress in
+                    Task { @MainActor in
+                        progressVC.updateProgress(progress.fractionCompleted ?? 0, fileName: progress.fileName)
+                    }
+                }
+                await MainActor.run {
+                    self.dismiss(progressVC)
+                    self.transferTask = nil
+                    self.setTransferInProgress(false, message: "Downloaded \(results.count) \(results.count == 1 ? "object" : "objects").")
+                }
+            } catch {
+                let item = items.first
+                let classified = S3BrowserError.classify(error, bucket: item?.bucket, requestedRegion: item?.location.regionOverride)
+                await MainActor.run {
+                    self.dismiss(progressVC)
+                    self.transferTask = nil
+                    self.setTransferInProgress(false, message: nil)
+                    self.showInlineError(classified)
+                }
+            }
+        }
+        transferTask = task
+        progressVC.onCancel = { task.cancel() }
+        updateActionAvailability()
+    }
+
+    private func setTransferInProgress(_ active: Bool, message: String?) {
+        if !active {
+            transferTask = nil
+        }
+        updateActionAvailability()
+        if let message {
+            statusLabel.textColor = .secondaryLabelColor
+            statusLabel.stringValue = message
+        }
+    }
+
     private func loadPrefix(resetItems: Bool) {
         guard let profile = selectedProfile else {
             showInlineError(.noProfileSelected)
@@ -485,6 +788,8 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         let generation = staleLoadGuard.begin()
         let region = selectedRegion(profile: profile)
         s3Location = S3Location(profileName: profile.name, regionOverride: region, bucket: nil, prefix: "")
+        updateLocationSummary()
+        updateActionAvailability()
         nextContinuationToken = nil
         items = []
         tableView.reloadData()
@@ -556,32 +861,47 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
     }
 
     private func selectedRegion(profile: AWSProfile) -> String {
-        regionComboBox.stringValue.nonEmpty ?? profile.regionHint ?? Self.defaultRegion
+        Self.resolvedRegion(input: regionComboBox.stringValue, profileRegion: profile.regionHint)
     }
 
     private func reloadRegionSuggestions(_ preferredRegion: String?) {
         let selected = regionComboBox.stringValue
-        let regions = ([preferredRegion].compactMap { $0?.nonEmpty } + Self.awsRegions)
-            .reduce(into: [String]()) { result, region in
-                if !result.contains(region) {
-                    result.append(region)
-                }
-            }
         regionComboBox.removeAllItems()
-        regionComboBox.addItems(withObjectValues: regions)
+        regionComboBox.addItems(withObjectValues: Self.regionSuggestions(preferredRegion: preferredRegion))
         regionComboBox.stringValue = selected
     }
 
     private func setLoading(_ loading: Bool, message: String?) {
+        isLoading = loading
         if loading {
             loadingSpinner.startAnimation(nil)
         } else {
             loadingSpinner.stopAnimation(nil)
         }
         browseButton.isEnabled = !loading && !profiles.isEmpty
+        uploadButton.isEnabled = !loading && transferTask == nil && S3TransferValidator.canUpload(to: s3Location)
+        downloadButton.isEnabled = !loading && transferTask == nil && S3TransferValidator.canDownload(selectedBrowserItems.compactMap(\.s3Item))
         loadMoreButton.isEnabled = !loading
         if let message {
             statusLabel.stringValue = message
+        }
+    }
+
+    private func updateActionAvailability() {
+        let isBusy = isLoading || transferTask != nil
+        browseButton.isEnabled = !isBusy && !profiles.isEmpty
+        uploadButton.isEnabled = !isBusy && S3TransferValidator.canUpload(to: s3Location)
+        downloadButton.isEnabled = !isBusy && S3TransferValidator.canDownload(selectedBrowserItems.compactMap(\.s3Item))
+    }
+
+    private func updateLocationSummary() {
+        let profileText = profileComboBox.stringValue.nonEmpty ?? "No profile"
+        let regionText = regionComboBox.stringValue.nonEmpty ?? "No region"
+        if let bucket = s3Location.bucket, !bucket.isEmpty {
+            let prefix = s3Location.prefix.isEmpty ? "/" : "/\(s3Location.prefix)"
+            locationSummaryLabel.stringValue = "\(profileText)  -  \(regionText)  -  s3://\(bucket)\(prefix)"
+        } else {
+            locationSummaryLabel.stringValue = "\(profileText)  -  \(regionText)  -  bucket list"
         }
     }
 
@@ -593,15 +913,18 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
     }
 
     private func showInlineMessage(_ message: String) {
+        isLoading = false
         lastError = nil
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.stringValue = message
         retryButton.isHidden = true
         detailsButton.isHidden = true
         loadingSpinner.stopAnimation(nil)
+        updateActionAvailability()
     }
 
     private func showInlineError(_ error: S3BrowserError) {
+        isLoading = false
         lastError = error
         statusLabel.textColor = .systemRed
         statusLabel.stringValue = error.localizedDescription
@@ -613,6 +936,7 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         loadMoreButton.isEnabled = false
         emptyLabel.stringValue = error.localizedDescription
         emptyLabel.isHidden = false
+        updateActionAvailability()
     }
 
     private func statusText() -> String {
@@ -681,6 +1005,7 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         let selected = selectedBrowserItems
         delegate?.fileListDidSelect(browserItems: selected)
         statusLabel.stringValue = statusText()
+        updateActionAvailability()
         loadMetadataForSingleSelection()
     }
 
@@ -701,6 +1026,47 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
             return
         }
         super.keyDown(with: event)
+    }
+
+    func tableView(_ tableView: NSTableView, validateDrop info: any NSDraggingInfo, proposedRow row: Int, proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
+        validateS3FileDrop(info)
+    }
+
+    func tableView(_ tableView: NSTableView, acceptDrop info: any NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
+        acceptS3FileDrop(info)
+    }
+
+    private func validateS3FileDrop(_ info: any NSDraggingInfo) -> NSDragOperation {
+        guard transferTask == nil,
+              info.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]),
+              let urls = fileURLs(from: info),
+              S3TransferValidator.uploadRejectionReason(localFileURLs: urls, to: s3Location) == nil else {
+            return []
+        }
+        return .copy
+    }
+
+    private func acceptS3FileDrop(_ info: any NSDraggingInfo) -> Bool {
+        guard let urls = fileURLs(from: info), !urls.isEmpty else {
+            showInlineError(.permission("Drop local files to upload."))
+            return false
+        }
+        if let rejection = S3TransferValidator.uploadRejectionReason(localFileURLs: urls, to: s3Location) {
+            showInlineError(.permission(rejection))
+            return false
+        }
+        promptForStorageClass { [weak self] storageClass in
+            guard let self, let storageClass else { return }
+            self.performUpload(fileURLs: urls, storageClass: storageClass)
+        }
+        return true
+    }
+
+    private func fileURLs(from info: any NSDraggingInfo) -> [URL]? {
+        info.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL]
     }
 
     private func loadMetadataForSingleSelection() {
@@ -724,21 +1090,28 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let selected = selectedBrowserItems.compactMap(\.s3Item)
-        guard !selected.isEmpty else { return }
-
-        if selected.count == 1, selected[0].isPrefix {
-            let title = selected[0].isBucket ? "Open Bucket" : "Open Prefix"
-            let openItem = menu.addItem(withTitle: title, action: #selector(contextOpenPrefix(_:)), keyEquivalent: "")
-            openItem.target = self
+        for descriptor in Self.contextMenuItems(for: selected, location: s3Location) {
+            let item = menu.addItem(
+                withTitle: descriptor.title,
+                action: selector(for: descriptor.command),
+                keyEquivalent: ""
+            )
+            item.target = descriptor.command == nil ? nil : self
+            item.isEnabled = descriptor.isEnabled
         }
-
-        let copyURI = menu.addItem(withTitle: "Copy S3 URI", action: #selector(contextCopyS3URI(_:)), keyEquivalent: "")
-        copyURI.target = self
     }
 
     @objc private func contextOpenPrefix(_ sender: Any?) {
         guard let item = selectedBrowserItems.first?.s3Item, item.isPrefix else { return }
         delegate?.fileListDidNavigate(to: .s3(item.location))
+    }
+
+    @objc private func contextUploadFiles(_ sender: Any?) {
+        uploadRequested(sender)
+    }
+
+    @objc private func contextDownload(_ sender: Any?) {
+        downloadRequested(sender)
     }
 
     @objc private func contextCopyS3URI(_ sender: Any?) {
@@ -755,6 +1128,53 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         "Checksum", "Rename", "Duplicate", "Cut", "Paste", "Quick Look",
     ]
 
+    static func contextMenuItems(for selected: [S3Item], location: S3Location) -> [S3ContextMenuItemDescriptor] {
+        var descriptors: [S3ContextMenuItemDescriptor] = []
+
+        if selected.isEmpty {
+            if S3TransferValidator.canUpload(to: location) {
+                descriptors.append(S3ContextMenuItemDescriptor(title: "Upload Files...", command: .uploadFiles, isEnabled: true))
+            }
+            return descriptors
+        }
+
+        if selected.count == 1, let item = selected.first, item.isPrefix {
+            descriptors.append(S3ContextMenuItemDescriptor(
+                title: item.isBucket ? "Open Bucket" : "Open Prefix",
+                command: .openPrefix,
+                isEnabled: true
+            ))
+        }
+
+        if S3TransferValidator.canDownload(selected) {
+            descriptors.append(S3ContextMenuItemDescriptor(title: "Download...", command: .download, isEnabled: true))
+        } else if selected.contains(where: \.isPrefix) {
+            descriptors.append(S3ContextMenuItemDescriptor(title: "Download Unavailable for Prefixes", command: nil, isEnabled: false))
+        }
+
+        if S3TransferValidator.canUpload(to: location) {
+            descriptors.append(S3ContextMenuItemDescriptor(title: "Upload Files...", command: .uploadFiles, isEnabled: true))
+        }
+
+        descriptors.append(S3ContextMenuItemDescriptor(title: "Copy S3 URI", command: .copyURI, isEnabled: true))
+        return descriptors
+    }
+
+    private func selector(for command: S3ContextMenuCommand?) -> Selector? {
+        switch command {
+        case .openPrefix:
+            return #selector(contextOpenPrefix(_:))
+        case .uploadFiles:
+            return #selector(contextUploadFiles(_:))
+        case .download:
+            return #selector(contextDownload(_:))
+        case .copyURI:
+            return #selector(contextCopyS3URI(_:))
+        case nil:
+            return nil
+        }
+    }
+
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -766,7 +1186,7 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
     private static let defaultRegion = "us-east-1"
 
     // Keep this list broad enough for autocomplete while still allowing typed future regions.
-    private static let awsRegions = [
+    static let awsRegions = [
         "us-east-1", "us-east-2", "us-west-1", "us-west-2",
         "af-south-1",
         "ap-east-1", "ap-east-2", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3",
@@ -784,6 +1204,19 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         "us-gov-east-1", "us-gov-west-1",
         "cn-north-1", "cn-northwest-1",
     ]
+
+    static func regionSuggestions(preferredRegion: String?, knownRegions: [String] = awsRegions) -> [String] {
+        ([preferredRegion].compactMap { $0?.nonEmpty } + knownRegions)
+            .reduce(into: [String]()) { result, region in
+                if !result.contains(region) {
+                    result.append(region)
+                }
+            }
+    }
+
+    static func resolvedRegion(input: String, profileRegion: String?) -> String {
+        input.nonEmpty ?? profileRegion?.nonEmpty ?? defaultRegion
+    }
 }
 
 private extension String {

@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_ui-flow_b844266bba",
+  "title": "Apple source Grove/Controllers#2",
+  "summary": "Apple Swift source group Grove/Controllers#2 with 3 files.",
+  "kind": "ui-flow",
+  "source": "apple-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "Grove.xcodeproj",
+      "symbol": "Grove/Controllers#2",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "Grove/Controllers/PreviewPaneController.swift",
+      "reason": "apple source group Grove/Controllers#2"
+    },
+    {
+      "path": "Grove/Controllers/S3BrowserViewController.swift",
+      "reason": "apple source group Grove/Controllers#2"
+    },
+    {
+      "path": "Grove/Controllers/SidebarViewController.swift",
+      "reason": "apple source group Grove/Controllers#2"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "apple",
+    "swift",
+    "xcode"
+  ],
+  "trustBoundaries": [
+    "filesystem"
+  ],
+  "status": "fixed",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-ui-flow-b844266bba-1ed4_bfd936d282",
+    "fnd_sig-feat-ui-flow-b844266bba-9511_2869dac837",
+    "fnd_sig-feat-ui-flow-b844266bba-f4dc_60dc173713"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260603T151304-a570ce",
+      "kind": "review",
+      "summary": "3 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-06-03T15:17:19.979Z"
+    }
+  ],
+  "createdAt": "2026-06-03T14:48:22.144Z",
+  "updatedAt": "2026-06-03T15:54:09.224Z"
+}

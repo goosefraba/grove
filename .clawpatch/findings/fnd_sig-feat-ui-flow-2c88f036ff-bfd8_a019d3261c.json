@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-2c88f036ff-bfd8_a019d3261c",
+  "featureId": "feat_ui-flow_2c88f036ff",
+  "title": "S3 object locations rewrite object keys as folder prefixes",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Grove/Models/StorageLocation.swift",
+      "startLine": 47,
+      "endLine": 52,
+      "symbol": "S3Location.init(profileName:regionOverride:bucket:prefix:)",
+      "quote": "self.prefix = Self.normalizedPrefix(prefix, isFolder: true)"
+    },
+    {
+      "path": "Grove/Models/StorageLocation.swift",
+      "startLine": 102,
+      "endLine": 104,
+      "symbol": "S3Location.objectLocation(key:)",
+      "quote": "S3Location(profileName: profileName, regionOverride: regionOverride, bucket: bucket, prefix: Self.normalizedPrefix(key, isFolder: false))"
+    },
+    {
+      "path": "Grove/Models/StorageLocation.swift",
+      "startLine": 146,
+      "endLine": 160,
+      "symbol": "S3Location.normalizedPrefix(_:isFolder:)",
+      "quote": "if isFolder, !prefix.isEmpty, !prefix.hasSuffix(\"/\") { prefix += \"/\" }"
+    },
+    {
+      "path": "Grove/Models/BrowserItem.swift",
+      "startLine": 119,
+      "endLine": 124,
+      "symbol": "BrowserItem.storageLocation",
+      "quote": "case .s3(let item): return .s3(item.location)"
+    }
+  ],
+  "reasoning": "S3 object keys are modeled through objectLocation(key:), but that method first applies path-like normalization and then passes the result into the public S3Location initializer. The initializer unconditionally normalizes as a folder, so an object key such as logs/app.txt becomes logs/app.txt/. The same normalization also strips leading slashes, collapses repeated slashes, trims whitespace, and maps dot-only keys to empty. BrowserItem exposes the resulting S3Item.location as the item's StorageLocation, so callers that navigate, persist, breadcrumb, or otherwise act on storageLocation can address a different S3 key or treat an object as a prefix.",
+  "reproduction": null,
+  "recommendation": "Separate folder-prefix normalization from object-key preservation. Add an initializer or factory that can store an already-normalized object key without appending a slash, and have objectLocation(key:) preserve exact object keys while prefix navigation continues to normalize folder prefixes.",
+  "whyTestsDoNotAlreadyCoverThis": "The included NavigationHistoryTests exercise only local URL history and do not assert S3Location.objectLocation or BrowserItem.storageLocation behavior for S3 objects.",
+  "suggestedRegressionTest": "Add a storage model test asserting that S3Location(profileName: \"ops\", regionOverride: \"us-east-1\", bucket: \"bucket\", prefix: \"\").objectLocation(key: \"logs/app.txt\").prefix == \"logs/app.txt\", and that BrowserItem.s3(object).storageLocation preserves the same object key without a trailing slash.",
+  "minimumFixScope": "Grove/Models/StorageLocation.swift, with any S3 object construction call sites adjusted only as needed to preserve the object-vs-prefix distinction.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260603T153237-8f4386",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence paths still exist. The public S3Location initializer still normalizes folder prefixes at Grove/Models/StorageLocation.swift:47-51, and BrowserItem.storageLocation still returns the S3 item location at Grove/Models/BrowserItem.swift:119-124, but the defective objectLocation path changed: Grove/Models/StorageLocation.swift:109-115 now uses a private normalizedPrefix initializer instead of routing back through the public folder-normalizing initializer, so logs/app.txt is not rewritten to logs/app.txt/. Production S3 object items are built through location.objectLocation(key:) at Grove/Services/S3BrowserService.swift:768-778. A current regression test at GroveTests/StorageModelTests.swift:36-53 asserts objectLocation.prefix == \"logs/app.txt\" and BrowserItem.s3(item).storageLocation preserves that object location. I attempted the narrow Xcode test, but execution was blocked by the read-only sandbox before package resolution/result-bundle creation with Operation not permitted; the current source and regression test still support classifying this clawpatch finding as fixed.",
+      "commands": [
+        "rg -n \"struct S3Location|objectLocation|normalizedPrefix|storageLocation|S3Item\" Grove/Models",
+        "nl -ba Grove/Models/StorageLocation.swift",
+        "nl -ba Grove/Models/BrowserItem.swift",
+        "rg --files GroveTests",
+        "nl -ba GroveTests/StorageModelTests.swift",
+        "rg -n \"objectLocation|storageLocation|logs/app|prefix|normalizedPrefix|S3Location\" GroveTests",
+        "xcodebuild test -project Grove.xcodeproj -scheme Grove -destination 'platform=macOS' -only-testing:GroveTests/StorageModelTests/testS3ObjectLocationPreservesObjectKeyWithoutFolderSlash",
+        "nl -ba Grove/Services/S3BrowserService.swift",
+        "rg -n \"objectLocation\\(|appendingPrefix\\(|S3Item\\(\" Grove/Services Grove/Controllers Grove/Models GroveTests"
+      ],
+      "createdAt": "2026-06-03T15:35:03.845Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-2c88f036ff_bfd80a71d1",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260603T151304-a570ce",
+  "createdAt": "2026-06-03T15:17:38.510Z",
+  "updatedAt": "2026-06-03T15:35:03.845Z"
+}

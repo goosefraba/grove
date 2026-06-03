@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260603T155413-46e00e",
+  "command": "review",
+  "args": [
+    "--root",
+    ".",
+    "--no-input",
+    "review",
+    "--limit",
+    "11",
+    "--json"
+  ],
+  "rootPath": "/Users/goosefraba/projects/development/goosefraba/grove",
+  "headSha": "fce8970b54b4b0437efde810abec8a93114c6498",
+  "startedAt": "2026-06-03T15:54:13.634Z",
+  "finishedAt": "2026-06-03T15:54:13.635Z",
+  "status": "completed",
+  "claimedFeatureIds": [],
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "errors": []
+}

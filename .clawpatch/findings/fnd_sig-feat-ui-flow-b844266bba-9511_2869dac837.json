@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-b844266bba-9511_2869dac837",
+  "featureId": "feat_ui-flow_b844266bba",
+  "title": "Markdown preview is bypassed for text-classified Markdown files",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Grove/Controllers/PreviewPaneController.swift",
+      "startLine": 127,
+      "endLine": 139,
+      "symbol": "updateSelection",
+      "quote": "if contentType.conforms(to: .text) || contentType.conforms(to: .sourceCode) {\n                showText(item)\n                return\n            }\n            // Markdown\n            if item.url.pathExtension.lowercased() == \"md\" || contentType.conforms(to: .text) {\n                showMarkdown(item)\n                return\n            }"
+    },
+    {
+      "path": "Grove/Controllers/PreviewPaneController.swift",
+      "startLine": 186,
+      "endLine": 199,
+      "symbol": "showMarkdown",
+      "quote": "let attributed = renderMarkdown(content)\n        textView.textStorage?.setAttributedString(attributed)"
+    }
+  ],
+  "reasoning": "The Markdown branch is ordered after the generic text/sourceCode branch. Any .md file whose contentType conforms to .text takes showText and returns before showMarkdown can run, so the intended Markdown rendering path is skipped for the common typed-file path.",
+  "reproduction": "Select a .md FileItem whose contentType conforms to .text. updateSelection calls showText at lines 132-134 and never reaches showMarkdown.",
+  "recommendation": "Check the .md extension or UTType.markdown before the generic text/sourceCode branch, then fall back to showText for other text types.",
+  "whyTestsDoNotAlreadyCoverThis": "There are no included PreviewPaneController tests or preview routing tests for Markdown versus plain text.",
+  "suggestedRegressionTest": "Create a FileItem for a temporary .md file with a text-conforming content type, call updateSelection, and assert the text storage contains heading attributes from renderMarkdown rather than the monospaced plain-text path.",
+  "minimumFixScope": "PreviewPaneController.updateSelection routing order.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260603T153237-8f4386",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence path still exists, but the cited routing has changed. Current Grove/Controllers/PreviewPaneController.swift lines 127-133 compute the extension/Markdown UTType and call showMarkdown before the generic text/sourceCode handling at lines 136-143, so a .md file with a text-conforming contentType no longer takes showText first. The old later Markdown branch from the finding is removed; showMarkdown still renders via renderMarkdown and sets the attributed string at lines 189-202. No PreviewPaneController regression test is present. xcodebuild validation could not run in this read-only sandbox because Xcode attempted to create temp/cache/result files and failed with Operation not permitted, so the classification is based on current code and repository search evidence.",
+      "commands": [
+        "pwd && git status --short",
+        "rg -n \"updateSelection|showMarkdown|showText|renderMarkdown|Markdown\" Grove/Controllers/PreviewPaneController.swift Grove 2>/dev/null",
+        "rg --files | rg 'PreviewPaneController|Preview|Test|Tests|Package\\.swift|\\.xcodeproj|\\.xcworkspace'",
+        "nl -ba Grove/Controllers/PreviewPaneController.swift | sed -n '1,260p'",
+        "rg -n \"PreviewPaneController|markdown|Markdown|renderMarkdown|showMarkdown|contentType|UTType\\.markdown\" GroveTests Grove -g '*.swift'",
+        "xcodebuild -list -project Grove.xcodeproj",
+        "git diff -- Grove/Controllers/PreviewPaneController.swift",
+        "nl -ba Grove/Models/FileItem.swift | sed -n '1,240p'",
+        "rg -n \"updateSelection\\(|PreviewPaneController\\(|FileItem\\(\" Grove GroveTests -g '*.swift'",
+        "nl -ba Grove/Models/FileItem.swift | sed -n '300,360p'"
+      ],
+      "createdAt": "2026-06-03T15:46:15.885Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-b844266bba_951142a7c4",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260603T151304-a570ce",
+  "createdAt": "2026-06-03T15:17:19.977Z",
+  "updatedAt": "2026-06-03T15:46:15.885Z"
+}

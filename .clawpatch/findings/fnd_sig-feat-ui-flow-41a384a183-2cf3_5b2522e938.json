@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-41a384a183-2cf3_5b2522e938",
+  "featureId": "feat_ui-flow_41a384a183",
+  "title": "Large downloads and checksums buffer entire files in memory",
+  "category": "performance",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "Grove/Services/AWSS3Gateway.swift",
+      "startLine": 122,
+      "endLine": 143,
+      "symbol": "AWSS3Gateway.downloadObject",
+      "quote": "let data = try await output.body?.readData() ?? Data()\n...\ntry data.write(to: request.temporaryURL, options: .atomic)"
+    },
+    {
+      "path": "Grove/Services/FileOperationService.swift",
+      "startLine": 620,
+      "endLine": 636,
+      "symbol": "FileOperationService.computeChecksum",
+      "quote": "let data = try Data(contentsOf: url)\n...\n_ = CC_SHA256(buffer.baseAddress, CC_LONG(data.count), &digest)"
+    },
+    {
+      "path": "GroveTests/S3BrowserServiceTests.swift",
+      "startLine": 201,
+      "endLine": 234,
+      "symbol": "S3BrowserServiceTests.testDownloadUsesUniqueDestinationForDirectoryConflicts",
+      "quote": "let data = Data(\"newdata\".utf8)\ntry data.write(to: request.temporaryURL)"
+    }
+  ],
+  "reasoning": "S3 downloads call readData() before writing, so the whole object must fit in RAM and progress cannot advance until the object has already been read. Local checksum calculation has the same whole-file allocation pattern. In a file browser, multi-GB objects or local files can cause memory pressure or termination.",
+  "reproduction": "Download a multi-GB S3 object or compute a checksum for a multi-GB local file; the service allocates a Data buffer roughly the size of the file before completing the operation.",
+  "recommendation": "Stream S3 response chunks directly to a FileHandle at temporaryURL while updating progress, and compute checksums incrementally from a FileHandle/InputStream rather than Data(contentsOf:).",
+  "whyTestsDoNotAlreadyCoverThis": "The S3 download tests use tiny in-memory Data payloads and assert destination conflict/cleanup behavior. There are no checksum tests and no test that would expose memory growth or chunked progress behavior.",
+  "suggestedRegressionTest": "Add chunked download/checksum tests around a streaming abstraction: verify a file larger than the chunk size is processed incrementally, progress advances before completion, and the resulting bytes/hash match expected values.",
+  "minimumFixScope": "AWSS3Gateway.downloadObject and FileOperationService.computeChecksum streaming implementations.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260603T153237-8f4386",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence paths still exist, but the production evidence has changed. `AWSS3Gateway.downloadObject` no longer calls `output.body?.readData()` or writes a whole downloaded `Data`; it now passes `output.body` into `writeBody`, which writes to a `FileHandle` and reads `ByteStream.stream` in 1,048,576-byte chunks with per-chunk progress. `FileOperationService.computeChecksum` no longer uses `Data(contentsOf: url)` or one-shot `CC_SHA256`; it opens a `FileHandle` and updates MD5/SHA256 incrementally over 1,048,576-byte reads. Exact-pattern search only found the tiny in-memory `Data` write/assertions in `S3BrowserServiceTests`, which is a mock/test fixture and not the production buffering path. Focused `xcodebuild` validation could not run in the current read-only sandbox because Xcode could not create `/tmp` xcrun/package/result files and exited 74, so the conclusion is source-verified rather than test-run-verified. Residual gap: there is still no streaming regression test, but the reported production issue is fixed in the current working tree.",
+      "commands": [
+        "git status --short",
+        "rg -n \"func downloadObject|readData|ByteStream|computeChecksum|Data\\\\(contentsOf|CC_SHA256|SHA256|CryptoKit|FileHandle\" Grove/Services/AWSS3Gateway.swift Grove/Services/FileOperationService.swift GroveTests/S3BrowserServiceTests.swift",
+        "nl -ba Grove/Services/AWSS3Gateway.swift | sed -n '115,155p'",
+        "nl -ba Grove/Services/AWSS3Gateway.swift | sed -n '200,235p'",
+        "nl -ba Grove/Services/AWSS3Gateway.swift | sed -n '232,260p'",
+        "nl -ba Grove/Services/FileOperationService.swift | sed -n '620,680p'",
+        "nl -ba GroveTests/S3BrowserServiceTests.swift | sed -n '190,245p'",
+        "rg -n \"readData\\\\(|readDataToEndOfFile|Data\\\\(contentsOf:|\\\\.write\\\\(to:.*temporaryURL|temporaryURL\\\\)\" Grove GroveTests",
+        "rg -n \"S3DownloadRequest|S3DownloadResponse|downloadObject\\\\(|writeBody\\\\(|readAsync\\\\(upToCount|ByteStream\" Grove GroveTests",
+        "git diff -- Grove/Services/AWSS3Gateway.swift",
+        "git diff -- Grove/Services/FileOperationService.swift",
+        "git diff -- GroveTests/S3BrowserServiceTests.swift",
+        "rg -n \"output\\\\.body\\\\?\\\\.readData|readData\\\\(\\\\) \\\\?\\\\? Data\\\\(\\\\)|let data = try await output\\\\.body|try data\\\\.write\\\\(to: request\\\\.temporaryURL|let data = try Data\\\\(contentsOf: url\\\\)|CC_SHA256\\\\(buffer\\\\.baseAddress|CC_MD5\\\\(buffer\\\\.baseAddress\" Grove GroveTests",
+        "rg -n \"readAsync\\\\(upToCount: 1_048_576\\\\)|FileHandle\\\\(forWritingTo: destinationURL\\\\)|FileHandle\\\\(forReadingFrom: url\\\\)|readData\\\\(ofLength: 1_048_576\\\\)|CC_SHA256_Update|CC_MD5_Update\" Grove/Services/AWSS3Gateway.swift Grove/Services/FileOperationService.swift",
+        "xcodebuild -list -project Grove.xcodeproj",
+        "xcodebuild test -project Grove.xcodeproj -scheme Grove -only-testing:GroveTests/S3BrowserServiceTests -destination 'platform=macOS'"
+      ],
+      "createdAt": "2026-06-03T15:38:12.977Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-41a384a183_2cf344a554",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260603T151304-a570ce",
+  "createdAt": "2026-06-03T15:17:42.480Z",
+  "updatedAt": "2026-06-03T15:38:12.977Z"
+}

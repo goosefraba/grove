@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-test-suite-919fbedeaf-4_32a1f4a6a4",
+  "featureId": "feat_test-suite_919fbedeaf",
+  "title": "Legacy window-state migration test reimplements the fallback instead of calling the restore path",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "GroveTests/StorageModelTests.swift",
+      "startLine": 16,
+      "endLine": 21,
+      "symbol": "testWindowStateMigrationFromCurrentURL",
+      "quote": "let legacy: [String: Any] = [\"currentURL\": \"/tmp/grove\"]\n        let migrated = StorageLocation.fromPropertyList(legacy[\"currentLocation\"]) ??\n            (legacy[\"currentURL\"] as? String).map { .local(URL(fileURLWithPath: $0).standardizedFileURL) }\n\n        XCTAssertEqual(migrated, .local(URL(fileURLWithPath: \"/tmp/grove\").standardizedFileURL))"
+    }
+  ],
+  "reasoning": "The test body performs the legacy currentURL fallback inline, so it can pass even if the production window restore code stops applying that fallback. That leaves restored user window state vulnerable to regression without a failing test.",
+  "reproduction": null,
+  "recommendation": "Test the production restore entrypoint with a legacy state dictionary, using an existing temporary directory for currentURL so any directory-existence guard is satisfied.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing test asserts the fallback expression embedded in the test, not the production migration behavior.",
+  "suggestedRegressionTest": "Create a temporary directory, build a legacy dictionary containing only currentURL and other required window-state fields as needed, call BrowserWindowController.restoreState(from:), and assert the resulting controller currentLocation is the expected local StorageLocation.",
+  "minimumFixScope": "Replace or supplement GroveTests/StorageModelTests.swift legacy migration coverage with a test of the production restore path.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260603T145748-41c449",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence path still exists, but the cited test body has changed. GroveTests/StorageModelTests.swift:16-24 now defines testWindowStateMigrationFromCurrentURLUsesRestorePath, creates a real temporary directory, calls BrowserWindowController.restoreState(from: [\"currentURL\": directory.path]), and asserts controller.currentLocation. The production restore path in Grove/Controllers/BrowserWindowController.swift:199-214 still performs the legacy currentURL fallback when currentLocation is absent and validates local directories. Static search no longer finds the old inline legacy dictionary/fromPropertyList fallback in the test source; it only appears as removed content in git diff. A focused xcodebuild test run could not execute because the current read-only sandbox prevented Xcode from creating cache, log, DerivedData, SourcePackages, and result bundle files, but the current source evidence shows the test gap itself is closed.",
+      "commands": [
+        "rg -n \"testWindowStateMigrationFromCurrentURL|currentURL|currentLocation|restoreState\\(|StorageLocation\" GroveTests Grove 2>/dev/null",
+        "nl -ba GroveTests/StorageModelTests.swift | sed -n '1,80p'",
+        "nl -ba Grove/Controllers/BrowserWindowController.swift | sed -n '170,225p'",
+        "rg -n \"let legacy|fromPropertyList\\(legacy\\[|legacy\\[\\\"currentURL\\\"\\]|testWindowStateMigrationFromCurrentURL\" GroveTests/StorageModelTests.swift GroveTests Grove",
+        "rg -n \"BrowserWindowController\\.restoreState\\(from: \\[\\\"currentURL\\\"|restoreState\\(from: \\[\\\"currentURL\\\"\" GroveTests Grove",
+        "git diff -- GroveTests/StorageModelTests.swift Grove/Controllers/BrowserWindowController.swift | sed -n '1,220p'",
+        "xcodebuild test -project Grove.xcodeproj -scheme Grove -only-testing:GroveTests/StorageModelTests/testWindowStateMigrationFromCurrentURLUsesRestorePath -derivedDataPath /tmp/GroveDerivedData-clawpatch-revalidate"
+      ],
+      "createdAt": "2026-06-03T15:01:13.708Z"
+    }
+  ],
+  "signature": "sig_feat-test-suite-919fbedeaf_445615034b",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260603T144837-9df936",
+  "createdAt": "2026-06-03T14:52:16.342Z",
+  "updatedAt": "2026-06-03T15:01:13.708Z"
+}

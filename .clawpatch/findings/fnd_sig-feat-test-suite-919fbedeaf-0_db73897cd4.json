@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-test-suite-919fbedeaf-0_db73897cd4",
+  "featureId": "feat_test-suite_919fbedeaf",
+  "title": "S3 context-menu test never inspects the actual S3 context menu",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "GroveTests/BrowserCapabilityTests.swift",
+      "startLine": 6,
+      "endLine": 15,
+      "symbol": "testS3ContextMenuDoesNotAdvertiseLocalOnlyCommands",
+      "quote": "let allowedTitles: Set<String> = [\n            \"Open Bucket\",\n            \"Open Prefix\",\n            \"Upload Files...\",\n            \"Download...\",\n            \"Download Unavailable for Prefixes\",\n            \"Copy S3 URI\",\n        ]\n        XCTAssertTrue(allowedTitles.isDisjoint(with: S3BrowserViewController.forbiddenLocalCommandTitles))"
+    }
+  ],
+  "reasoning": "This test does not construct an S3 browser view, trigger menu population, or compare the real menu items against the forbidden local-only commands. It only proves that a hand-written allowed-title set is disjoint from another static forbidden-title set, so a regression that adds a local-only command to the actual S3 context menu can pass untouched.",
+  "reproduction": null,
+  "recommendation": "Exercise the actual S3 menu-building path, or extract the menu-title builder into a testable helper, then assert the generated S3 menu titles are disjoint from the forbidden local-only command set.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing assertion never reads the actual menu contents.",
+  "suggestedRegressionTest": "Seed an S3BrowserViewController state for empty, prefix, and object selections, call menuNeedsUpdate on an NSMenu, collect menu item titles, and assert no title appears in S3BrowserViewController.forbiddenLocalCommandTitles.",
+  "minimumFixScope": "Update GroveTests/BrowserCapabilityTests.swift to validate generated menu titles rather than only comparing static sets.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260603T145748-41c449",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence path still exists at GroveTests/BrowserCapabilityTests.swift, but the quoted static allowedTitles assertion is gone. The current test now builds titles from S3BrowserViewController.contextMenuItems(for:location:) for empty, prefix, and object selections and checks them against forbiddenLocalCommandTitles. The actual S3 menu population in Grove/Controllers/S3BrowserViewController.swift:1087-1098 delegates directly to that same contextMenuItems(for:location:) helper, whose descriptors are defined at lines 1128-1157. That satisfies the recommendation to extract the S3 menu-title builder into a testable helper and assert generated S3 menu titles are disjoint from local-only commands. I attempted the narrow Xcode test, but the read-only sandbox prevented Xcode cache/result-bundle writes, so there is no live test pass evidence from this run.",
+      "commands": [
+        "pwd",
+        "git status --short",
+        "rg -n \"testS3ContextMenuDoesNotAdvertiseLocalOnlyCommands|forbiddenLocalCommandTitles|menuNeedsUpdate|allowedTitles|Copy S3 URI|Upload Files\"",
+        "nl -ba GroveTests/BrowserCapabilityTests.swift | sed -n '1,80p'",
+        "nl -ba Grove/Controllers/S3BrowserViewController.swift | sed -n '1060,1195p'",
+        "rg -n \"S3ContextMenuItemDescriptor|contextMenuItemDescriptors|build.*Menu|forbiddenLocalCommandTitles|menuNeedsUpdate\" GroveTests Grove/Controllers/S3BrowserViewController.swift",
+        "rg --files | sed -n '1,120p'",
+        "xcodebuild -list -project Grove.xcodeproj",
+        "nl -ba Grove/Controllers/S3BrowserViewController.swift | sed -n '1,45p'",
+        "rg -n \"allowedTitles|S3BrowserViewController\\.contextMenuItems|forbiddenLocalCommandTitles|testS3ContextMenuDoesNotAdvertiseLocalOnlyCommands\" GroveTests Grove/Controllers/S3BrowserViewController.swift",
+        "git diff -- GroveTests/BrowserCapabilityTests.swift Grove/Controllers/S3BrowserViewController.swift | sed -n '1,220p'",
+        "nl -ba GroveTests/BrowserCapabilityTests.swift | sed -n '57,125p'",
+        "xcodebuild -project Grove.xcodeproj -scheme Grove -destination 'platform=macOS' -only-testing:GroveTests/BrowserCapabilityTests/testS3ContextMenuDoesNotAdvertiseLocalOnlyCommands test"
+      ],
+      "createdAt": "2026-06-03T14:59:29.890Z"
+    }
+  ],
+  "signature": "sig_feat-test-suite-919fbedeaf_0c4df463a8",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260603T144837-9df936",
+  "createdAt": "2026-06-03T14:52:16.342Z",
+  "updatedAt": "2026-06-03T14:59:29.890Z"
+}

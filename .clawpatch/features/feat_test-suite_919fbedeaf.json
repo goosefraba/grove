@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_test-suite_919fbedeaf",
+  "title": "Apple test suite .",
+  "summary": "Apple Swift test group . with 6 files.",
+  "kind": "test-suite",
+  "source": "apple-test-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "GroveTests/AWSProfileStoreTests.swift",
+      "symbol": ".",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "GroveTests/AWSProfileStoreTests.swift",
+      "reason": "apple test group ."
+    },
+    {
+      "path": "GroveTests/BrowserCapabilityTests.swift",
+      "reason": "apple test group ."
+    },
+    {
+      "path": "GroveTests/FileOperationServiceTests.swift",
+      "reason": "apple test group ."
+    },
+    {
+      "path": "GroveTests/NavigationHistoryTests.swift",
+      "reason": "apple test group ."
+    },
+    {
+      "path": "GroveTests/S3BrowserServiceTests.swift",
+      "reason": "apple test group ."
+    },
+    {
+      "path": "GroveTests/StorageModelTests.swift",
+      "reason": "apple test group ."
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "apple",
+    "swift",
+    "test"
+  ],
+  "trustBoundaries": [],
+  "status": "fixed",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-test-suite-919fbedeaf-0_db73897cd4",
+    "fnd_sig-feat-test-suite-919fbedeaf-4_32a1f4a6a4"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260603T144837-9df936",
+      "kind": "review",
+      "summary": "2 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-06-03T14:52:16.347Z"
+    }
+  ],
+  "createdAt": "2026-06-03T14:48:22.144Z",
+  "updatedAt": "2026-06-03T15:54:09.224Z"
+}

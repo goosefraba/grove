@@ -430,8 +430,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
             self?.scheduleReload(for: eventURLs)
         }
 
-        let shouldShowLoadingIndicator = allItems.isEmpty
-        reloadContents(showLoadingIndicator: shouldShowLoadingIndicator)
+        clearLoadedItemsForPendingLoad(message: "Loading folder contents...")
+        reloadContents(showLoadingIndicator: true, preserveSelection: false)
     }
 
     private func scheduleReload(for eventURLs: [URL]) {
@@ -463,13 +463,13 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         }
     }
 
-    private func reloadContents(showLoadingIndicator: Bool = false) {
+    private func reloadContents(showLoadingIndicator: Bool = false, preserveSelection: Bool = true) {
         guard !isShowingSearchResults else { return }
         loadGeneration += 1
         let generation = loadGeneration
         let requestURL = currentURL.standardizedFileURL
         let requestShowHiddenFiles = showHiddenFiles
-        let selectedURLs = Set(selectedItems.map(\.url))
+        let selectedURLs = preserveSelection ? Set(selectedItems.map(\.url)) : []
 
         spinnerWorkItem?.cancel()
         loadingSpinner.stopAnimation(nil)
@@ -518,6 +518,17 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
                 self.emptyLabel.isHidden = false
             }
         }
+    }
+
+    private func clearLoadedItemsForPendingLoad(message: String) {
+        allItems = []
+        items = []
+        tableView.deselectAll(nil)
+        tableView.reloadData()
+        updateStatusBar()
+        delegate?.fileListDidSelect(items: [])
+        emptyLabel.stringValue = message
+        emptyLabel.isHidden = false
     }
 
     private func restoreSelection(previouslySelectedURLs: Set<URL>) {
@@ -1004,10 +1015,10 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
     func tableView(_ tableView: NSTableView, validateDrop info: any NSDraggingInfo, proposedRow row: Int, proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
         if dropOperation == .on && row < items.count && items[row].isDirectory && !items[row].isPackage {
-            return info.draggingSourceOperationMask.contains(.move) ? .move : .copy
+            return FileDropOperationResolver.preferredOperation(from: info.draggingSourceOperationMask)
         }
         if dropOperation == .above {
-            return info.draggingSourceOperationMask.contains(.move) ? .move : .copy
+            return FileDropOperationResolver.preferredOperation(from: info.draggingSourceOperationMask)
         }
         return []
     }
@@ -1016,7 +1027,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         guard let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
               !urls.isEmpty else { return false }
         let destination = (dropOperation == .on && row < items.count && items[row].isDirectory) ? items[row].url : currentURL
-        let isMove = info.draggingSourceOperationMask.contains(.move)
+        let isMove = FileDropOperationResolver.isMove(FileDropOperationResolver.preferredOperation(from: info.draggingSourceOperationMask))
         return performFileTransfer(urls, to: destination, isMove: isMove)
     }
 
@@ -1024,13 +1035,13 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         guard info.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) else {
             return []
         }
-        return info.draggingSourceOperationMask.contains(.move) ? .move : .copy
+        return FileDropOperationResolver.preferredOperation(from: info.draggingSourceOperationMask)
     }
 
     private func acceptBackgroundDrop(_ info: any NSDraggingInfo) -> Bool {
         guard let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
               !urls.isEmpty else { return false }
-        let isMove = info.draggingSourceOperationMask.contains(.move)
+        let isMove = FileDropOperationResolver.isMove(FileDropOperationResolver.preferredOperation(from: info.draggingSourceOperationMask))
         return performFileTransfer(urls, to: currentURL, isMove: isMove)
     }
 
@@ -1619,20 +1630,32 @@ extension FileListViewController: NSMenuDelegate {
             targetURL = currentURL
         }
 
-        let escapedPath = targetURL.path
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        let script = """
-        tell application "Terminal"
-        activate
-        do script "cd \"\(escapedPath)\""
-        end tell
-        """
+        let script = Self.terminalChangeDirectoryScript(for: targetURL)
 
         if let appleScript = NSAppleScript(source: script) {
             var error: NSDictionary?
             appleScript.executeAndReturnError(&error)
         }
+    }
+
+    static func terminalChangeDirectoryScript(for url: URL) -> String {
+        let command = "cd \(shellQuotedPath(url.path))"
+        return """
+        tell application "Terminal"
+        activate
+        do script "\(appleScriptEscapedString(command))"
+        end tell
+        """
+    }
+
+    private static func shellQuotedPath(_ path: String) -> String {
+        "'\(path.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private static func appleScriptEscapedString(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
     // MARK: - Tags

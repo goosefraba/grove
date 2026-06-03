@@ -13,12 +13,15 @@ final class StorageModelTests: XCTestCase {
         }
     }
 
-    func testWindowStateMigrationFromCurrentURL() {
-        let legacy: [String: Any] = ["currentURL": "/tmp/grove"]
-        let migrated = StorageLocation.fromPropertyList(legacy["currentLocation"]) ??
-            (legacy["currentURL"] as? String).map { .local(URL(fileURLWithPath: $0).standardizedFileURL) }
+    @MainActor
+    func testWindowStateMigrationFromCurrentURLUsesRestorePath() throws {
+        let directory = try Self.makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
 
-        XCTAssertEqual(migrated, .local(URL(fileURLWithPath: "/tmp/grove").standardizedFileURL))
+        let controller = try XCTUnwrap(BrowserWindowController.restoreState(from: ["currentURL": directory.path]))
+        defer { controller.window?.close() }
+
+        XCTAssertEqual(controller.currentLocation, .local(directory.standardizedFileURL))
     }
 
     func testS3ParentLocationsAndDisplayNames() {
@@ -28,6 +31,26 @@ final class StorageModelTests: XCTestCase {
         XCTAssertEqual(root.parent, .s3(S3Location(profileName: "ops", regionOverride: "eu-west-1", bucket: "logs", prefix: "app/")))
         XCTAssertEqual(root.parent?.parent, .s3(S3Location(profileName: "ops", regionOverride: "eu-west-1", bucket: "logs", prefix: "")))
         XCTAssertEqual(root.parent?.parent?.parent, .s3(S3Location(profileName: "ops", regionOverride: "eu-west-1", bucket: nil, prefix: "")))
+    }
+
+    func testS3ObjectLocationPreservesObjectKeyWithoutFolderSlash() {
+        let location = S3Location(profileName: "ops", regionOverride: "us-east-1", bucket: "bucket", prefix: "")
+        let objectLocation = location.objectLocation(key: "logs/app.txt")
+        let item = S3Item(
+            bucket: "bucket",
+            key: "logs/app.txt",
+            name: "app.txt",
+            isPrefix: false,
+            size: 12,
+            lastModified: nil,
+            eTag: nil,
+            storageClass: "STANDARD",
+            location: objectLocation,
+            metadata: nil
+        )
+
+        XCTAssertEqual(objectLocation.prefix, "logs/app.txt")
+        XCTAssertEqual(BrowserItem.s3(item).storageLocation, .s3(objectLocation))
     }
 
     func testS3BreadcrumbsUseProfileBucketAndPrefixSemantics() {
@@ -57,6 +80,8 @@ final class StorageModelTests: XCTestCase {
         let capabilities = StorageLocation.s3(S3Location()).capabilities
 
         XCTAssertTrue(capabilities.contains(.browse))
+        XCTAssertTrue(capabilities.contains(.s3Upload))
+        XCTAssertTrue(capabilities.contains(.s3Download))
         XCTAssertFalse(capabilities.contains(.trash))
         XCTAssertFalse(capabilities.contains(.openTerminal))
         XCTAssertFalse(capabilities.contains(.finderReveal))
@@ -65,5 +90,12 @@ final class StorageModelTests: XCTestCase {
         XCTAssertFalse(capabilities.contains(.checksum))
         XCTAssertFalse(capabilities.contains(.rename))
         XCTAssertFalse(capabilities.contains(.localDragDrop))
+    }
+
+    private static func makeTemporaryDirectory() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GroveStorageModelTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
     }
 }

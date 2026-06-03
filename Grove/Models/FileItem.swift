@@ -4,6 +4,21 @@ import UniformTypeIdentifiers
 import ImageIO
 import Darwin
 
+enum FinderTagColor: Int, Hashable {
+    case gray = 1
+    case green = 2
+    case purple = 3
+    case blue = 4
+    case yellow = 5
+    case red = 6
+    case orange = 7
+}
+
+struct FileTag: Hashable {
+    let name: String
+    let color: FinderTagColor?
+}
+
 struct FileItem: Identifiable, Hashable {
     let id: URL
     let url: URL
@@ -18,6 +33,7 @@ struct FileItem: Identifiable, Hashable {
     let contentType: UTType?
     let posixPermissions: UInt16
     let tags: [String]
+    let tagMetadata: [FileTag]
 
     var isApplication: Bool {
         contentType?.conforms(to: .application) ?? false ||
@@ -131,7 +147,8 @@ struct FileItem: Identifiable, Hashable {
             kind: isDirectory && !isPackage ? "Folder" : type?.localizedDescription ?? "Document",
             contentType: type,
             posixPermissions: UInt16(mode & 0o7777),
-            tags: []
+            tags: [],
+            tagMetadata: []
         )
     }
 
@@ -147,6 +164,7 @@ struct FileItem: Identifiable, Hashable {
             return UInt16(mode & 0o7777)
         }()
 
+        let tagNames = values.tagNames ?? []
         return FileItem(
             id: url,
             url: url,
@@ -160,7 +178,8 @@ struct FileItem: Identifiable, Hashable {
             kind: values.localizedTypeDescription ?? "Document",
             contentType: values.contentType,
             posixPermissions: perms,
-            tags: values.tagNames ?? []
+            tags: tagNames,
+            tagMetadata: tagMetadata(for: url, tagNames: tagNames)
         )
     }
 
@@ -182,7 +201,8 @@ struct FileItem: Identifiable, Hashable {
             kind: "Folder",
             contentType: .folder,
             posixPermissions: 0,
-            tags: []
+            tags: [],
+            tagMetadata: []
         )
     }
 
@@ -200,6 +220,51 @@ struct FileItem: Identifiable, Hashable {
 
     static func setTags(_ tags: [String], for url: URL) throws {
         try (url as NSURL).setResourceValue(tags, forKey: .tagNamesKey)
+    }
+
+    static func tagMetadata(for url: URL, tagNames: [String]? = nil) -> [FileTag] {
+        let names = tagNames ?? tags(for: url)
+        guard !names.isEmpty else { return [] }
+        let colorsByName = finderTagColors(for: url)
+        return names.map { name in
+            FileTag(name: name, color: colorsByName[name])
+        }
+    }
+
+    private static func finderTagColors(for url: URL) -> [String: FinderTagColor] {
+        guard let encodedTags = finderTagAttributeStrings(for: url) else { return [:] }
+        return encodedTags.reduce(into: [String: FinderTagColor]()) { result, encoded in
+            guard let separator = encoded.lastIndex(of: "\n") else { return }
+            let name = String(encoded[..<separator])
+            let rawValue = Int(encoded[encoded.index(after: separator)...])
+            result[name] = rawValue.flatMap(FinderTagColor.init(rawValue:))
+        }
+    }
+
+    private static func finderTagAttributeStrings(for url: URL) -> [String]? {
+        let attributeName = "com.apple.metadata:_kMDItemUserTags"
+        let path = url.path
+        let length = path.withCString { pathPointer in
+            attributeName.withCString { namePointer in
+                getxattr(pathPointer, namePointer, nil, 0, 0, 0)
+            }
+        }
+        guard length > 0 else { return nil }
+
+        var data = Data(count: length)
+        let bytesRead = data.withUnsafeMutableBytes { buffer in
+            path.withCString { pathPointer in
+                attributeName.withCString { namePointer in
+                    getxattr(pathPointer, namePointer, buffer.baseAddress, length, 0, 0)
+                }
+            }
+        }
+        guard bytesRead > 0 else { return nil }
+        if bytesRead < data.count {
+            data.removeSubrange(bytesRead..<data.count)
+        }
+
+        return (try? PropertyListSerialization.propertyList(from: data, options: [], format: nil)) as? [String]
     }
 
     var formattedSize: String {

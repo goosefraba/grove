@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-a19422d7d0-21fd_27a550b12b",
+  "featureId": "feat_ui-flow_a19422d7d0",
+  "title": "Tag colors are inferred from tag names instead of Finder tag color metadata",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "Grove/Views/TagView.swift",
+      "startLine": 28,
+      "endLine": 40,
+      "symbol": "TagColors.color(for:)",
+      "quote": "enum TagColors {\n    static let standardTags: [(name: String, color: Color)] = [\n        (\"Red\", .red),\n        (\"Orange\", .orange),\n        (\"Yellow\", .yellow),\n        (\"Green\", .green),\n        (\"Blue\", .blue),\n        (\"Purple\", .purple),\n        (\"Gray\", .gray),\n    ]\n\n    static func color(for tagName: String) -> Color {\n        standardTags.first { $0.name == tagName }?.color ?? .secondary"
+    }
+  ],
+  "reasoning": "macOS Finder tag color is metadata distinct from the user-visible tag name. This view maps colors only by exact literal names like \"Red\" and \"Blue\", so a red tag renamed to \"Client A\" or any custom-named colored tag will render as the fallback secondary color. In a file browser inspector, that misrepresents the file's tag metadata even though the tag label is present.",
+  "reproduction": "Create or rename a Finder tag so its display name is not one of Red, Orange, Yellow, Green, Blue, Purple, or Gray while keeping a colored tag assignment. Apply it to a file and open the inspector; TagView renders the tag dot/background with the secondary fallback color.",
+  "recommendation": "Represent tags with both display name and color metadata, or resolve the Finder tag color/index before rendering. TagView should render from that structured model rather than deriving color from the display name string.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided for TagView, TagColors, or inspector tag rendering, and the payload includes no cases for custom or renamed Finder tags.",
+  "suggestedRegressionTest": "Add a TagView/inspector rendering test that supplies a custom-named tag with a non-gray Finder color and asserts the rendered color follows the tag metadata rather than the tag name.",
+  "minimumFixScope": "Change the tag data passed to TagView from plain strings to a model that includes display name and color, then update TagColors/TagView rendering accordingly.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260603T153237-8f4386",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence path still exists, but the cited TagColors implementation has changed. Grove/Views/TagView.swift now renders from FileTag values and TagColors.color(for:) uses tag.color metadata first, only falling back to name-based colors when metadata is nil. Grove/Models/FileItem.swift now defines FinderTagColor/FileTag and parses com.apple.metadata:_kMDItemUserTags xattr entries into name/color pairs, and Grove/Views/InspectorView.swift passes item.tagMetadata into TagView. A current search found no remaining TagView inspector call that passes plain tag name strings. There is no matching regression test in GroveTests, and xcodebuild could not be used in this read-only sandbox because it failed creating temp/cache files, so the outcome is based on current code evidence rather than an executable test run.",
+      "commands": [
+        "pwd && rg -n \"TagColors|TagView|tagNames|resourceTagNames|tagIdentifier|Finder tag|labelNumber|NSURLTag|URLResourceKey.*tag|contentTag\" .",
+        "git status --short && rg --files",
+        "nl -ba Grove/Views/TagView.swift | sed -n '1,220p'",
+        "nl -ba Grove/Models/FileItem.swift | sed -n '1,320p'",
+        "nl -ba Grove/Views/InspectorView.swift | sed -n '1,140p' && nl -ba Grove/Controllers/FileListViewController.swift | sed -n '1660,1705p'",
+        "rg -n \"FileTag|FinderTagColor|TagColors|tagMetadata|tagNamesKey|com\\.apple\\.metadata:_kMDItemUserTags|kMDItemUserTags|MDItem\" Grove GroveTests BACKLOG.md .clawpatch",
+        "rg -n \"FileItem\\(|tagMetadata|FileTag|TagView|FinderTagColor|tagNamesKey|tags\\(\" GroveTests Grove -g '*.swift'",
+        "xcodebuild -list -project Grove.xcodeproj",
+        "rg -n \"loadForDirectoryListing|FileItem\\.load\\(|updateInspector|InspectorView|selectedItems|tagMetadata\" Grove/Controllers Grove/Models Grove/Views -g '*.swift'",
+        "nl -ba Grove/Controllers/InspectorViewController.swift | sed -n '1,180p' && nl -ba Grove/Controllers/FileListViewController.swift | sed -n '1,260p'",
+        "nl -ba Grove/Controllers/FileListViewController.swift | sed -n '330,520p;640,675p;1128,1165p'",
+        "nl -ba Grove/Controllers/IconViewController.swift | sed -n '120,210p' && nl -ba Grove/Controllers/ColumnViewController.swift | sed -n '130,205p' && nl -ba Grove/Controllers/GalleryViewController.swift | sed -n '220,250p'",
+        "nl -ba Grove/Services/FileOperationService.swift | sed -n '1,140p'",
+        "rg -n \"FileItem\\.load\\(\" Grove -g '*.swift'"
+      ],
+      "createdAt": "2026-06-03T15:43:24.914Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-a19422d7d0_21fd51534d",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260603T151304-a570ce",
+  "createdAt": "2026-06-03T15:15:59.279Z",
+  "updatedAt": "2026-06-03T15:43:24.914Z"
+}

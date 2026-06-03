@@ -64,7 +64,7 @@ struct InspectorView: View {
                         Text("Tags")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        TagView(tags: item.tags)
+                        TagView(tags: item.tagMetadata)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }

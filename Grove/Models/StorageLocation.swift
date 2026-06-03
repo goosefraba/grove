@@ -26,6 +26,8 @@ struct StorageCapabilities: OptionSet, Hashable {
     static let tags = StorageCapabilities(rawValue: 1 << 14)
     static let compression = StorageCapabilities(rawValue: 1 << 15)
     static let checksum = StorageCapabilities(rawValue: 1 << 16)
+    static let s3Upload = StorageCapabilities(rawValue: 1 << 17)
+    static let s3Download = StorageCapabilities(rawValue: 1 << 18)
 
     static let localReadWrite: StorageCapabilities = [
         .browse, .toolbarSearch, .showHiddenFiles, .createFolder, .openLocalFile,
@@ -33,7 +35,7 @@ struct StorageCapabilities: OptionSet, Hashable {
         .localDragDrop, .finderReveal, .openTerminal, .tags, .compression, .checksum,
     ]
 
-    static let s3ReadOnly: StorageCapabilities = [.browse]
+    static let s3Browser: StorageCapabilities = [.browse, .s3Upload, .s3Download]
 }
 
 struct S3Location: Hashable, Codable {
@@ -47,6 +49,13 @@ struct S3Location: Hashable, Codable {
         self.regionOverride = Self.clean(regionOverride)
         self.bucket = Self.clean(bucket)
         self.prefix = Self.normalizedPrefix(prefix, isFolder: true)
+    }
+
+    private init(profileName: String?, regionOverride: String?, bucket: String?, normalizedPrefix: String) {
+        self.profileName = Self.clean(profileName)
+        self.regionOverride = Self.clean(regionOverride)
+        self.bucket = Self.clean(bucket)
+        self.prefix = normalizedPrefix
     }
 
     var effectiveProfileName: String? {
@@ -98,7 +107,12 @@ struct S3Location: Hashable, Codable {
     }
 
     func objectLocation(key: String) -> S3Location {
-        S3Location(profileName: profileName, regionOverride: regionOverride, bucket: bucket, prefix: Self.normalizedPrefix(key, isFolder: false))
+        S3Location(
+            profileName: profileName,
+            regionOverride: regionOverride,
+            bucket: bucket,
+            normalizedPrefix: Self.normalizedPrefix(key, isFolder: false)
+        )
     }
 
     var breadcrumbs: [StorageBreadcrumb] {
@@ -212,7 +226,7 @@ enum StorageLocation: Hashable, Codable {
         case .local:
             return .localReadWrite
         case .s3:
-            return .s3ReadOnly
+            return .s3Browser
         }
     }
 

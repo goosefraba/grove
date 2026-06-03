@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-01884210cd-cf19_a7727597c1",
+  "featureId": "feat_ui-flow_01884210cd",
+  "title": "New Tab can attach a browser tab to any key window",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Grove/App/AppDelegate.swift",
+      "startLine": 50,
+      "endLine": 63,
+      "symbol": "AppDelegate.newTab(_:)",
+      "quote": "guard let currentWindow = NSApp.keyWindow else { ... }\nlet currentWC = currentWindow.windowController as? BrowserWindowController\n...\ncurrentWindow.addTabbedWindow(newWindow, ordered: .above)"
+    },
+    {
+      "path": "Grove/App/AppDelegate.swift",
+      "startLine": 256,
+      "endLine": 257,
+      "symbol": "AppDelegate.setupMainMenu()",
+      "quote": "let newTabItem = fileMenu.addItem(withTitle: \"New Tab\", action: #selector(newTab(_:)), keyEquivalent: \"t\")"
+    }
+  ],
+  "reasoning": "The New Tab action only requires some key window, then uses that window as the tab host. The BrowserWindowController cast is optional and only affects the initial location, so if an About panel, help window, sheet, or other non-browser window is key, Cmd+T creates a BrowserWindowController and calls addTabbedWindow on the non-browser window. That can produce an invalid tab group or a no-op/leaked controller instead of opening a normal Grove browser window.",
+  "reproduction": "Open a non-browser Grove window such as the About panel so it is key, then invoke File > New Tab or Cmd+T.",
+  "recommendation": "Require the key window to have a BrowserWindowController before tabbing. If it does not, fall back to newWindow(_:) or find the most recent visible BrowserWindowController and tab into that.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were declared for AppDelegate, and the discovered BrowserCapabilityTests cover BrowserWindowController validation rather than AppDelegate menu dispatch with a non-browser key window.",
+  "suggestedRegressionTest": "Add an AppDelegate menu-flow test that makes a non-BrowserWindow key, invokes newTab(_:), and asserts Grove opens or selects a BrowserWindow rather than adding the browser window as a tab of the non-browser window.",
+  "minimumFixScope": "AppDelegate.newTab(_:) and, if needed, a small helper to locate a valid BrowserWindowController.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260603T145748-41c449",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original AppDelegate.swift path still exists, but the vulnerable evidence changed in the current worktree. AppDelegate.newTab now guards on activeBrowserWindowController() and gets the tab host from currentWC.window, falling back to newWindow(sender) when no BrowserWindowController is available; activeBrowserWindowController() only returns the key BrowserWindowController or a tracked visible BrowserWindowController. The File > New Tab menu item still exists at AppDelegate.swift:262, but rg found the only addTabbedWindow call in this corrected newTab flow, so a non-browser key window is no longer used as the tab host. No AppDelegate/newTab regression test is present. xcodebuild test was attempted but could not run in this read-only sandbox because Xcode could not create /tmp derived-data/package/cache files, so the conclusion is based on current code and search evidence rather than a passing test run.",
+      "commands": [
+        "pwd && rg -n \"func newTab|setupMainMenu|New Tab|addTabbedWindow|BrowserWindowController\" Grove/App/AppDelegate.swift",
+        "rg -n \"newTab\\(|New Tab|AppDelegate|addTabbedWindow|BrowserCapabilityTests|BrowserWindowController\" Grove Tests . --glob '!DerivedData/**' --glob '!build/**' --glob '!*.xcuserdata/**'",
+        "rg --files -g '*AppDelegate*' -g '*Tests*' -g 'Package.swift' -g '*.xcodeproj' -g '*.xcworkspace' -g 'run.sh'",
+        "sed -n '1,120p' Grove/App/AppDelegate.swift",
+        "sed -n '210,280p' Grove/App/AppDelegate.swift",
+        "sed -n '1,140p' GroveTests/BrowserCapabilityTests.swift",
+        "sed -n '400,445p' Grove/Controllers/BrowserWindowController.swift",
+        "sed -n '1,220p' /Users/goosefraba/.codex/plugins/cache/openai-curated/build-macos-apps/83d1f0d2/skills/test-triage/SKILL.md",
+        "xcodebuild -list -project Grove.xcodeproj",
+        "rg -n \"AppDelegate|newTab|activeBrowserWindowController|addTabbedWindow|NSApp.keyWindow|non-browser|About\" GroveTests Grove/App Grove/Controllers",
+        "nl -ba Grove/App/AppDelegate.swift | sed -n '45,95p'",
+        "nl -ba Grove/App/AppDelegate.swift | sed -n '255,265p'",
+        "nl -ba Grove/App/AppDelegate.swift | sed -n '220,230p'",
+        "find . -maxdepth 2 -type f \\( -name '*Tests.swift' -o -name '*.xctestplan' \\) | sort",
+        "find Grove.xcodeproj -maxdepth 4 -type f | sort",
+        "rg -n \"PBXNativeTarget|productName|name = Grove|GroveTests|XCBuildConfiguration|Test\" Grove.xcodeproj/project.pbxproj",
+        "xcodebuild test -project Grove.xcodeproj -scheme Grove -destination 'platform=macOS' -derivedDataPath /tmp/grove-clawpatch-derived-data",
+        "sed -n '1,180p' Grove.xcodeproj/xcshareddata/xcschemes/Grove.xcscheme",
+        "git status --short && git rev-parse --show-toplevel && git rev-parse --abbrev-ref HEAD",
+        "git diff -- Grove/App/AppDelegate.swift"
+      ],
+      "createdAt": "2026-06-03T15:03:11.197Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-01884210cd_cf196cce23",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260603T144837-9df936",
+  "createdAt": "2026-06-03T14:52:22.200Z",
+  "updatedAt": "2026-06-03T15:03:11.197Z"
+}

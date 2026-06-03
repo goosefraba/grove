@@ -39,6 +39,22 @@ enum GroveUI {
     static let iconSize: CGFloat = 44
 }
 
+enum FileDropOperationResolver {
+    static func preferredOperation(from sourceMask: NSDragOperation) -> NSDragOperation {
+        if sourceMask.contains(.copy) {
+            return .copy
+        }
+        if sourceMask.contains(.move) {
+            return .move
+        }
+        return []
+    }
+
+    static func isMove(_ operation: NSDragOperation) -> Bool {
+        operation == .move
+    }
+}
+
 extension FileViewControllerProtocol {
     var currentLocation: StorageLocation { .local(currentURL.standardizedFileURL) }
     var selectedBrowserItems: [BrowserItem] { selectedItems.map(BrowserItem.local) }

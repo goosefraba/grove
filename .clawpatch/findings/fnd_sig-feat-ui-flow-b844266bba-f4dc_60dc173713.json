@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-b844266bba-f4dc_60dc173713",
+  "featureId": "feat_ui-flow_b844266bba",
+  "title": "Dropping a new sidebar favorite ignores the drop position",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Grove/Controllers/SidebarViewController.swift",
+      "startLine": 190,
+      "endLine": 194,
+      "symbol": "outlineView(_:acceptDrop:item:childIndex:)",
+      "quote": "return acceptExternalDrop(info: info, targetIndex: index)"
+    },
+    {
+      "path": "Grove/Controllers/SidebarViewController.swift",
+      "startLine": 233,
+      "endLine": 267,
+      "symbol": "acceptExternalDrop",
+      "quote": "private func acceptExternalDrop(info: any NSDraggingInfo, targetIndex: Int) -> Bool {\n...\n            customFavs.append(newItem)\n        }\n\n        SidebarItem.saveCustomFavorites(customFavs)"
+    }
+  ],
+  "reasoning": "The outline view passes the proposed child index into acceptExternalDrop, but the helper never uses targetIndex and always appends new custom favorites. A user dropping a folder between existing favorites gets it at the end instead, which contradicts the drop indicator and makes ordering unreliable.",
+  "reproduction": "Drag a folder into the Favorites section above an existing custom favorite. The drop is accepted, but the new SidebarItem is appended to customFavs instead of inserted at the proposed child index.",
+  "recommendation": "Translate targetIndex into the custom-favorites index after accounting for built-in favorites, clamp it, and insert new items there while preserving multi-item order.",
+  "whyTestsDoNotAlreadyCoverThis": "No included tests exercise SidebarViewController drag/drop or SidebarItem custom-favorite ordering.",
+  "suggestedRegressionTest": "Add a sidebar drop-order test with existing custom favorites and a proposed child index before the last item, then assert saveCustomFavorites receives the new item at that position.",
+  "minimumFixScope": "SidebarViewController.acceptExternalDrop insertion logic.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260603T153237-8f4386",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence path still exists. At Grove/Controllers/SidebarViewController.swift:190-194, acceptDrop still forwards the proposed child index to acceptExternalDrop. The helper at Grove/Controllers/SidebarViewController.swift:233-277 no longer ignores targetIndex: it computes a custom-favorites insertion index after subtracting built-in favorites, clamps it, inserts each dropped item at that index, and increments for multi-item drops. git diff confirms the old customFavs.append(newItem) in acceptExternalDrop was replaced with customFavs.insert(newItem, at: customTargetIndex). The remaining customFavs.append(newItem) is in addFavorite, not the drag/drop path. Xcode test/list validation could not run in this read-only sandbox because xcodebuild could not create xcrun/DerivedData/result-bundle files, but current code evidence shows the reported drag/drop ordering bug is fixed.",
+      "commands": [
+        "pwd && git status --short",
+        "rg -n \"acceptExternalDrop|outlineView\\\\(_:acceptDrop:item:childIndex:|saveCustomFavorites|customFavs|customFavorites\" Grove/Controllers/SidebarViewController.swift Grove -g '*.swift'",
+        "nl -ba Grove/Controllers/SidebarViewController.swift | sed -n '160,290p'",
+        "git diff -- Grove/Controllers/SidebarViewController.swift",
+        "rg -n \"SidebarViewController|acceptExternalDrop|customFavorites|saveCustomFavorites|drop\" GroveTests Grove -g '*Tests.swift' -g '*.swift'",
+        "xcodebuild -list -project Grove.xcodeproj",
+        "nl -ba Grove/Controllers/SidebarViewController.swift | sed -n '120,175p'",
+        "sed -n '1,150p' Grove/Models/SidebarItem.swift",
+        "rg -n \"func outlineView\\\\(_ outlineView: NSOutlineView, validateDrop|setDropItem|acceptExternalDrop|customTargetIndex|customFavs\\\\.append\\\\(newItem\\\\)\" Grove/Controllers/SidebarViewController.swift"
+      ],
+      "createdAt": "2026-06-03T15:47:35.587Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-b844266bba_f4dc0f189e",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260603T151304-a570ce",
+  "createdAt": "2026-06-03T15:17:19.977Z",
+  "updatedAt": "2026-06-03T15:47:35.587Z"
+}

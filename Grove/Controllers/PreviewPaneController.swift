@@ -124,6 +124,15 @@ final class PreviewPaneController: NSViewController {
             return
         }
 
+        let ext = item.url.pathExtension.lowercased()
+        let isMarkdownType = item.contentType.map { contentType in
+            UTType(filenameExtension: "md").map { contentType.conforms(to: $0) } ?? false
+        } ?? false
+        if ext == "md" || isMarkdownType {
+            showMarkdown(item)
+            return
+        }
+
         if let contentType = item.contentType {
             if contentType.conforms(to: .image) {
                 showImage(item)
@@ -133,15 +142,9 @@ final class PreviewPaneController: NSViewController {
                 showText(item)
                 return
             }
-            // Markdown
-            if item.url.pathExtension.lowercased() == "md" || contentType.conforms(to: .text) {
-                showMarkdown(item)
-                return
-            }
         }
 
         // Check extension-based fallbacks
-        let ext = item.url.pathExtension.lowercased()
         let textExtensions: Set<String> = [
             "txt", "md", "swift", "py", "js", "ts", "json", "xml", "html", "css",
             "yml", "yaml", "toml", "sh", "bash", "zsh", "fish", "rb", "rs", "go",

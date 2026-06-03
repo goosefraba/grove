@@ -48,6 +48,7 @@ final class BatchRenameViewController: NSViewController {
         findField.placeholderString = "Search pattern"
         findField.target = self
         findField.action = #selector(fieldChanged(_:))
+        findField.delegate = self
         view.addSubview(findField)
 
         let replaceLabel = NSTextField(labelWithString: "Replace:")
@@ -58,6 +59,7 @@ final class BatchRenameViewController: NSViewController {
         replaceField.placeholderString = "Replacement text"
         replaceField.target = self
         replaceField.action = #selector(fieldChanged(_:))
+        replaceField.delegate = self
         view.addSubview(replaceField)
 
         regexCheckbox.translatesAutoresizingMaskIntoConstraints = false

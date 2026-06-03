@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260603T144837-9df936",
+  "command": "review",
+  "args": [
+    "--root",
+    ".",
+    "--no-input",
+    "review",
+    "--limit",
+    "3",
+    "--json"
+  ],
+  "rootPath": "/Users/goosefraba/projects/development/goosefraba/grove",
+  "headSha": "fce8970b54b4b0437efde810abec8a93114c6498",
+  "startedAt": "2026-06-03T14:48:37.248Z",
+  "finishedAt": "2026-06-03T14:53:15.095Z",
+  "status": "completed",
+  "claimedFeatureIds": [
+    "feat_test-suite_919fbedeaf",
+    "feat_ui-flow_01884210cd",
+    "feat_ui-flow_22f9e2353f"
+  ],
+  "findingIds": [
+    "fnd_sig-feat-test-suite-919fbedeaf-0_db73897cd4",
+    "fnd_sig-feat-test-suite-919fbedeaf-4_32a1f4a6a4",
+    "fnd_sig-feat-ui-flow-01884210cd-cf19_a7727597c1",
+    "fnd_sig-feat-ui-flow-01884210cd-e50c_b1488e42b2",
+    "fnd_sig-feat-ui-flow-22f9e2353f-7214_6a3803963a"
+  ],
+  "patchAttemptIds": [],
+  "errors": []
+}

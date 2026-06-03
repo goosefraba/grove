@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "projectId": "prj_https-github-com-goosefraba-grov_dc7b59fa99",
+  "name": "grove",
+  "rootPath": "/Users/goosefraba/projects/development/goosefraba/grove",
+  "git": {
+    "remoteUrl": "https://github.com/goosefraba/grove.git",
+    "defaultBranch": "main",
+    "currentBranch": "main",
+    "headSha": "fce8970b54b4b0437efde810abec8a93114c6498"
+  },
+  "detected": {
+    "languages": [
+      "swift"
+    ],
+    "frameworks": [],
+    "packageManagers": [],
+    "commands": {
+      "typecheck": null,
+      "lint": null,
+      "format": null,
+      "test": null
+    }
+  },
+  "createdAt": "2026-06-03T14:48:10.249Z",
+  "updatedAt": "2026-06-03T14:48:10.249Z"
+}

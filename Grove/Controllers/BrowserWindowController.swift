@@ -487,7 +487,7 @@ extension BrowserWindowController: BrowserWindowFileDropDelegate {
               info.draggingPasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) else {
             return []
         }
-        return info.draggingSourceOperationMask.contains(.move) ? .move : .copy
+        return FileDropOperationResolver.preferredOperation(from: info.draggingSourceOperationMask)
     }
 
     func browserWindow(_ window: BrowserWindow, acceptFileDropWith info: any NSDraggingInfo) -> Bool {
@@ -498,7 +498,7 @@ extension BrowserWindowController: BrowserWindowFileDropDelegate {
             return false
         }
 
-        let isMove = info.draggingSourceOperationMask.contains(.move)
+        let isMove = FileDropOperationResolver.isMove(FileDropOperationResolver.preferredOperation(from: info.draggingSourceOperationMask))
         return transferDroppedFiles(urls, to: destination, isMove: isMove)
     }
 

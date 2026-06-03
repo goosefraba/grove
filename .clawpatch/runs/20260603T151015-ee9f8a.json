@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260603T151015-ee9f8a",
+  "command": "revalidate",
+  "args": [
+    "--root",
+    ".",
+    "--no-input",
+    "revalidate",
+    "--finding",
+    "fnd_sig-feat-ui-flow-22f9e2353f-7214_6a3803963a",
+    "--json"
+  ],
+  "rootPath": "/Users/goosefraba/projects/development/goosefraba/grove",
+  "headSha": "fce8970b54b4b0437efde810abec8a93114c6498",
+  "startedAt": "2026-06-03T15:10:15.200Z",
+  "finishedAt": "2026-06-03T15:12:10.963Z",
+  "status": "completed",
+  "claimedFeatureIds": [],
+  "findingIds": [
+    "fnd_sig-feat-ui-flow-22f9e2353f-7214_6a3803963a"
+  ],
+  "patchAttemptIds": [],
+  "errors": []
+}

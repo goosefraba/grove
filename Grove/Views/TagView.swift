@@ -2,7 +2,15 @@ import SwiftUI
 import AppKit
 
 struct TagView: View {
-    let tags: [String]
+    let tags: [FileTag]
+
+    init(tags: [FileTag]) {
+        self.tags = tags
+    }
+
+    init(tagNames: [String]) {
+        self.tags = tagNames.map { FileTag(name: $0, color: nil) }
+    }
 
     var body: some View {
         if !tags.isEmpty {
@@ -12,7 +20,7 @@ struct TagView: View {
                         Circle()
                             .fill(TagColors.color(for: tag))
                             .frame(width: 10, height: 10)
-                        Text(tag)
+                        Text(tag.name)
                             .font(.caption)
                     }
                     .padding(.horizontal, 6)
@@ -24,7 +32,7 @@ struct TagView: View {
                 }
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("Tags: \(tags.joined(separator: ", "))")
+            .accessibilityLabel("Tags: \(tags.map(\.name).joined(separator: ", "))")
         }
     }
 }
@@ -40,8 +48,19 @@ enum TagColors {
         ("Gray", .gray),
     ]
 
-    static func color(for tagName: String) -> Color {
+    static func color(for tag: FileTag) -> Color {
+        if let tagColor = tag.color {
+            return color(for: tagColor)
+        }
+        return color(forName: tag.name)
+    }
+
+    static func color(forName tagName: String) -> Color {
         standardTags.first { $0.name == tagName }?.color ?? .secondary
+    }
+
+    static func color(for color: FinderTagColor) -> Color {
+        Color(nsColor(for: color))
     }
 
     static func nsColor(for tagName: String) -> NSColor {
@@ -54,6 +73,18 @@ enum TagColors {
         case "Purple": return .systemPurple
         case "Gray": return .systemGray
         default: return .secondaryLabelColor
+        }
+    }
+
+    static func nsColor(for color: FinderTagColor) -> NSColor {
+        switch color {
+        case .red: return .systemRed
+        case .orange: return .systemOrange
+        case .yellow: return .systemYellow
+        case .green: return .systemGreen
+        case .blue: return .systemBlue
+        case .purple: return .systemPurple
+        case .gray: return .systemGray
         }
     }
 }

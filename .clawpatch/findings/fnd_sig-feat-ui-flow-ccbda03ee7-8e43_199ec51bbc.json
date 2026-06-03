@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-ccbda03ee7-8e43_199ec51bbc",
+  "featureId": "feat_ui-flow_ccbda03ee7",
+  "title": "Batch rename preview does not update as the user types",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Grove/Controllers/BatchRenameViewController.swift",
+      "startLine": 47,
+      "endLine": 60,
+      "symbol": "BatchRenameViewController.setupUI",
+      "quote": null
+    },
+    {
+      "path": "Grove/Controllers/BatchRenameViewController.swift",
+      "startLine": 158,
+      "endLine": 159,
+      "symbol": "BatchRenameViewController.updatePreview",
+      "quote": null
+    },
+    {
+      "path": "Grove/Controllers/BatchRenameViewController.swift",
+      "startLine": 247,
+      "endLine": 249,
+      "symbol": "BatchRenameViewController.controlTextDidChange",
+      "quote": null
+    }
+  ],
+  "reasoning": "The find and replace fields only set target/action, while the per-keystroke controlTextDidChange hook is never wired as either field's delegate. NSTextField actions fire on commit/end editing, so the preview table and Rename enabled state can stay stale while text is being typed.",
+  "reproduction": "Open batch rename, type a find pattern that should change filenames, and observe that the preview and Rename button do not update until the field commits rather than on each edit.",
+  "recommendation": "Assign findField.delegate and replaceField.delegate to self, or otherwise explicitly subscribe to text-change notifications for both fields, so updatePreview runs for each edit.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked UI tests cover batch rename field editing or Rename button enablement.",
+  "suggestedRegressionTest": "Add an AppKit controller test that sends text-change notifications for the find and replace fields and asserts previewNames and renameButton.isEnabled update immediately.",
+  "minimumFixScope": "Wire BatchRenameViewController text fields to the existing NSTextFieldDelegate path.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260603T153237-8f4386",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original path still exists, but the evidence has changed. In Grove/Controllers/BatchRenameViewController.swift, setupUI now assigns findField.delegate = self at line 51 and replaceField.delegate = self at line 62, while controlTextDidChange at lines 249-252 still calls updatePreview(). That wires both text fields to the per-keystroke NSTextFieldDelegate path the finding said was missing, so the stale preview/rename-button issue is fixed in current code. I found no BatchRename regression tests in GroveTests. An attempted xcodebuild project listing could not complete because the read-only sandbox prevented Xcode from writing cache/result files, so executable validation was blocked by environment permissions rather than a code failure.",
+      "commands": [
+        "pwd && rg --files | rg 'BatchRenameViewController|BatchRename|Tests|test'",
+        "nl -ba Grove/Controllers/BatchRenameViewController.swift | sed -n '1,320p'",
+        "rg -n \"controlTextDidChange|delegate\\s*=|findField|replaceField|updatePreview|BatchRenameViewController\" Grove tests Tests . -g '!DerivedData'",
+        "xcodebuild -list -project Grove.xcodeproj",
+        "find GroveTests -maxdepth 1 -type f -print | sort | xargs -I{} sh -c 'printf \"%s\\n\" \"$1\"; nl -ba \"$1\" | sed -n \"1,220p\"' sh {}",
+        "rg -n \"BatchRename|batch rename|renameButton|previewNames|controlTextDidChange|findField.delegate|replaceField.delegate\" GroveTests Grove/Controllers/BatchRenameViewController.swift"
+      ],
+      "createdAt": "2026-06-03T15:52:08.854Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-ccbda03ee7_8e43e74f51",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260603T151304-a570ce",
+  "createdAt": "2026-06-03T15:20:45.576Z",
+  "updatedAt": "2026-06-03T15:52:08.854Z"
+}

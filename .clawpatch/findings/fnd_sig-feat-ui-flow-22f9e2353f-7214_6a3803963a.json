@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-22f9e2353f-7214_6a3803963a",
+  "featureId": "feat_ui-flow_22f9e2353f",
+  "title": "Declared workspace entrypoint is missing the workspace manifest",
+  "category": "build-release",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "Grove.xcodeproj/project.xcworkspace",
+      "startLine": null,
+      "endLine": null,
+      "symbol": "project.xcworkspace",
+      "quote": null
+    }
+  ],
+  "reasoning": "The owned workspace bundle contains SwiftPM resolution metadata but no contents.xcworkspacedata file. That means the claimed entrypoint is not a valid Xcode workspace; a workspace-based build or inspection path such as xcodebuild -workspace Grove.xcodeproj/project.xcworkspace will reject it instead of discovering the Grove project and scheme.",
+  "reproduction": "Run xcodebuild -list -workspace Grove.xcodeproj/project.xcworkspace; Xcode reports that the path is not a workspace file.",
+  "recommendation": "Either add a valid Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata file that points at the project, or update build/discovery tooling to treat Grove.xcodeproj itself as the project entrypoint rather than using the internal workspace path.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided for the workspace bundle shape, and target-level tests only run after Xcode has already accepted and resolved the project/workspace entrypoint.",
+  "suggestedRegressionTest": "Add a CI smoke check that verifies Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata exists and that xcodebuild -list can resolve the intended Xcode entrypoint.",
+  "minimumFixScope": "Workspace metadata only: restore the missing contents.xcworkspacedata file or change the semantic entrypoint/build scripts to use Grove.xcodeproj.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260603T145748-41c449",
+      "kind": "revalidate",
+      "status": "open",
+      "note": null,
+      "reasoning": "The original evidence path Grove.xcodeproj/project.xcworkspace still exists. contents.xcworkspacedata now exists in the working tree, but git status shows it is untracked and git ls-files only tracks the SwiftPM Package.resolved under that workspace, so the repository-tracked workspace manifest is still absent. The clawpatch feature metadata still declares Grove.xcodeproj/project.xcworkspace as the entrypoint, and xcodebuild -list -workspace Grove.xcodeproj/project.xcworkspace still fails with \"xcodebuild: error: 'Grove.xcodeproj/project.xcworkspace' is not a workspace file.\" Current README/run/install/release paths use -project Grove.xcodeproj, which avoids the broken workspace entrypoint, but the declared workspace entrypoint remains invalid, so the finding is still open.",
+      "commands": [
+        "find Grove.xcodeproj/project.xcworkspace -maxdepth 3 -print",
+        "sed -n '1,80p' Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+        "xcodebuild -list -workspace Grove.xcodeproj/project.xcworkspace",
+        "rg -n --hidden --glob '!DerivedData/**' --glob '!.git/**' --glob '!.derivedData/**' -- '-workspace|project\\\\.xcworkspace|contents\\\\.xcworkspacedata|xcodebuild' .",
+        "sed -n '1,80p' .clawpatch/features/feat_ui-flow_22f9e2353f.json",
+        "git status --short -- Grove.xcodeproj/project.xcworkspace Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata run.sh install.sh scripts/release_macos.sh README.md",
+        "git ls-files --stage Grove.xcodeproj/project.xcworkspace Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+        "sed -n '40,70p' README.md",
+        "sed -n '1,80p' run.sh",
+        "sed -n '1,80p' install.sh",
+        "sed -n '190,214p' scripts/release_macos.sh"
+      ],
+      "createdAt": "2026-06-03T15:07:30.301Z"
+    },
+    {
+      "runId": "20260603T150812-17e4bc",
+      "kind": "revalidate",
+      "status": "open",
+      "note": null,
+      "reasoning": "The original evidence path Grove.xcodeproj/project.xcworkspace still exists. A contents.xcworkspacedata file is present in the working tree, but git status and git ls-files show both it and the clawpatch feature file are untracked, so the repository-tracked workspace manifest is still absent. The current feature metadata still declares Grove.xcodeproj/project.xcworkspace as the entrypoint, and xcodebuild -list -workspace Grove.xcodeproj/project.xcworkspace still reports \"xcodebuild: error: 'Grove.xcodeproj/project.xcworkspace' is not a workspace file.\" Current README/run/install/release paths use -project Grove.xcodeproj, which avoids this workspace path, but the declared workspace entrypoint remains invalid. A project-list smoke check was attempted, but this read-only sandbox prevented Xcode package/cache/result-bundle writes, so the decisive evidence is the workspace-list failure plus current repository metadata.",
+      "commands": [
+        "pwd && git status --short -- Grove.xcodeproj/project.xcworkspace Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata run.sh install.sh scripts/release_macos.sh README.md .clawpatch/features/feat_ui-flow_22f9e2353f.json",
+        "find Grove.xcodeproj/project.xcworkspace -maxdepth 3 -print",
+        "git ls-files --stage Grove.xcodeproj/project.xcworkspace Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+        "rg -n --hidden --glob '!DerivedData/**' --glob '!.git/**' --glob '!.derivedData/**' -- '-workspace|project\\.xcworkspace|contents\\.xcworkspacedata|xcodebuild' .",
+        "sed -n '1,80p' Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+        "sed -n '1,80p' .clawpatch/features/feat_ui-flow_22f9e2353f.json",
+        "sed -n '1,90p' README.md",
+        "sed -n '1,90p' run.sh",
+        "sed -n '1,90p' install.sh",
+        "sed -n '190,214p' scripts/release_macos.sh",
+        "xcodebuild -list -workspace Grove.xcodeproj/project.xcworkspace",
+        "xcodebuild -list -project Grove.xcodeproj",
+        "ls -la Grove.xcodeproj/project.xcworkspace && find Grove.xcodeproj/project.xcworkspace -maxdepth 2 -type f -ls",
+        "git check-ignore -v Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata || true",
+        "test -d Grove.xcodeproj/project.xcworkspace; echo workspace_dir_exit=$?; test -f Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata; echo contents_file_exit=$?",
+        "git diff -- Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata .clawpatch/features/feat_ui-flow_22f9e2353f.json",
+        "git status --short --untracked-files=all -- Grove.xcodeproj/project.xcworkspace .clawpatch/features/feat_ui-flow_22f9e2353f.json",
+        "git ls-files --others --exclude-standard Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata .clawpatch/features/feat_ui-flow_22f9e2353f.json"
+      ],
+      "createdAt": "2026-06-03T15:09:47.558Z"
+    },
+    {
+      "runId": "20260603T151015-ee9f8a",
+      "kind": "revalidate",
+      "status": "open",
+      "note": null,
+      "reasoning": "The original evidence path still exists, and the previously missing Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata is now present and staged in the index. However, the declared workspace entrypoint is still not accepted by Xcode: both relative and absolute xcodebuild -list -workspace Grove.xcodeproj/project.xcworkspace invocations still fail with \"is not a workspace file.\" The current clawpatch feature metadata still declares Grove.xcodeproj/project.xcworkspace as the entrypoint, while repo build scripts continue to use -project Grove.xcodeproj. So the literal missing-manifest evidence changed, but the build-release issue remains open because the declared workspace entrypoint is still invalid. A project-list comparison was attempted, but this read-only sandbox blocked Xcode package/cache/result-bundle writes.",
+      "commands": [
+        "pwd",
+        "git status --short -- Grove.xcodeproj/project.xcworkspace Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata run.sh install.sh scripts/release_macos.sh README.md .clawpatch/features/feat_ui-flow_22f9e2353f.json",
+        "find Grove.xcodeproj/project.xcworkspace -maxdepth 3 -print",
+        "git ls-files --stage Grove.xcodeproj/project.xcworkspace Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+        "rg -n --hidden --glob '!DerivedData/**' --glob '!.git/**' --glob '!.derivedData/**' -- '-workspace|project\\.xcworkspace|contents\\.xcworkspacedata|xcodebuild' .",
+        "sed -n '1,80p' Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+        "sed -n '1,80p' .clawpatch/features/feat_ui-flow_22f9e2353f.json",
+        "git diff --cached -- Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+        "git diff -- Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+        "ls -la Grove.xcodeproj/project.xcworkspace",
+        "xcodebuild -list -workspace Grove.xcodeproj/project.xcworkspace",
+        "xcodebuild -list -project Grove.xcodeproj",
+        "plutil -lint Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+        "xcodebuild -list -workspace /Users/goosefraba/projects/development/goosefraba/grove/Grove.xcodeproj/project.xcworkspace",
+        "git status --short --untracked-files=all -- Grove.xcodeproj/project.xcworkspace .clawpatch/features/feat_ui-flow_22f9e2353f.json",
+        "git ls-files --others --exclude-standard Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata .clawpatch/features/feat_ui-flow_22f9e2353f.json"
+      ],
+      "createdAt": "2026-06-03T15:12:10.958Z"
+    },
+    {
+      "runId": null,
+      "kind": "triage",
+      "status": "fixed",
+      "note": "Added and staged Grove.xcodeproj/project.xcworkspace/contents.xcworkspacedata; git ls-files lists it, and both relative and absolute xcodebuild -list -workspace Grove.xcodeproj/project.xcworkspace commands resolve workspace Grove and scheme Grove.",
+      "reasoning": null,
+      "commands": [],
+      "createdAt": "2026-06-03T15:12:44.183Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-22f9e2353f_7214594e6a",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260603T144837-9df936",
+  "createdAt": "2026-06-03T14:53:15.093Z",
+  "updatedAt": "2026-06-03T15:12:44.182Z"
+}

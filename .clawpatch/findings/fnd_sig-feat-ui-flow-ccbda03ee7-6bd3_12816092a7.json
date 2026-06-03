@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-ccbda03ee7-6bd3_12816092a7",
+  "featureId": "feat_ui-flow_ccbda03ee7",
+  "title": "Open in Terminal allows shell command substitution from filenames",
+  "category": "security",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Grove/Controllers/FileListViewController.swift",
+      "startLine": 1614,
+      "endLine": 1629,
+      "symbol": "FileListViewController.contextOpenInTerminal",
+      "quote": null
+    }
+  ],
+  "reasoning": "The selected path is interpolated into a Terminal command as cd \"...\" after only backslashes and double quotes are escaped. Shell double quotes still evaluate command substitutions such as $() and backticks, so opening Terminal in a directory whose name contains command substitution can execute arbitrary shell commands under the user's account.",
+  "reproduction": "Create or select a folder named $(touch /tmp/grove-terminal-pwn), choose Open in Terminal, and the generated Terminal command will evaluate the substitution before cd runs.",
+  "recommendation": "Build the Terminal command using a real shell-quoted path, for example AppleScript's quoted form of the POSIX path, and keep AppleScript string escaping separate from shell escaping.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were provided for this controller feature, and this requires a malicious filesystem-name case through the context-menu Terminal action.",
+  "suggestedRegressionTest": "Add a unit test around the script/command builder with paths containing $(), backticks, quotes, spaces, and apostrophes, asserting the generated command cannot perform shell substitution.",
+  "minimumFixScope": "Change FileListViewController.contextOpenInTerminal path quoting or extract a safe command builder used by that action.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260603T153237-8f4386",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "Original evidence path still exists, but the vulnerable code has moved/changed. Current Grove/Controllers/FileListViewController.swift:1625-1658 routes Open in Terminal through terminalChangeDirectoryScript(for:), builds command = \"cd \\(shellQuotedPath(url.path))\", and shellQuotedPath wraps the path in single quotes while escaping embedded single quotes as '\\'' before AppleScript string escaping. That prevents $() and backticks from being evaluated by the shell. A repository search found no other Swift do-script cd path interpolation. GroveTests/BrowserCapabilityTests.swift:35-43 now includes a regression test for paths containing $(), backticks, and single quotes. Focused xcodebuild test could not execute in this read-only sandbox because xcodebuild could not create /tmp xcrun/cache/result-bundle files, but current code and test evidence indicate the finding is fixed.",
+      "commands": [
+        "rg -n \"contextOpenInTerminal|Open in Terminal|Terminal|quoted form|POSIX path|osascript|do script|cd \" Grove Tests . 2>/dev/null",
+        "git status --short",
+        "rg --files -g '*Test*' -g '*.swift'",
+        "nl -ba Grove/Controllers/FileListViewController.swift | sed -n '1608,1665p'",
+        "nl -ba GroveTests/BrowserCapabilityTests.swift | sed -n '1,80p'",
+        "rg -n \"func shellQuotedPath|func terminalChangeDirectoryScript|appleScriptEscapedString|contextOpenInTerminal|do script\" Grove GroveTests",
+        "sed -n '1,220p' /Users/goosefraba/.codex/plugins/cache/openai-curated/build-macos-apps/2b564709/skills/test-triage/SKILL.md",
+        "xcodebuild -list -project Grove.xcodeproj",
+        "xcodebuild test -project Grove.xcodeproj -scheme Grove -destination 'platform=macOS' -only-testing:GroveTests/BrowserCapabilityTests/testTerminalChangeDirectoryScriptShellQuotesPath",
+        "git diff -- Grove/Controllers/FileListViewController.swift | sed -n '1,220p'",
+        "git diff -- GroveTests/BrowserCapabilityTests.swift | sed -n '1,140p'",
+        "find . -path './.git' -prune -o -name '*.swift' -print | xargs rg -n \"do script|cd \\\\\\\"|shellQuotedPath|terminalChangeDirectoryScript|appleScriptEscapedString|Open in Terminal\"",
+        "rg -n \"do script|cd \\\\\\\"|shellQuotedPath|terminalChangeDirectoryScript|appleScriptEscapedString|Open in Terminal\" Grove GroveTests --glob '*.swift'",
+        "/bin/sh -c \"printf '<%s>\\n' '/tmp/Grove \\$(printf PWNED) \\`printf BAD\\` '\\''quoted'\\'''\""
+      ],
+      "createdAt": "2026-06-03T15:51:11.507Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-ccbda03ee7_6bd3a1941b",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260603T151304-a570ce",
+  "createdAt": "2026-06-03T15:20:45.575Z",
+  "updatedAt": "2026-06-03T15:51:11.507Z"
+}

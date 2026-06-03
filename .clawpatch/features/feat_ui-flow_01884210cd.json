@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_ui-flow_01884210cd",
+  "title": "Apple source Grove/App",
+  "summary": "Apple Swift source group Grove/App with 2 files.",
+  "kind": "ui-flow",
+  "source": "apple-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "Grove.xcodeproj",
+      "symbol": "Grove/App",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "Grove/App/AppDelegate.swift",
+      "reason": "apple source group Grove/App"
+    },
+    {
+      "path": "Grove/App/main.swift",
+      "reason": "apple source group Grove/App"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "apple",
+    "swift",
+    "xcode"
+  ],
+  "trustBoundaries": [
+    "filesystem"
+  ],
+  "status": "fixed",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-ui-flow-01884210cd-cf19_a7727597c1",
+    "fnd_sig-feat-ui-flow-01884210cd-e50c_b1488e42b2"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260603T144837-9df936",
+      "kind": "review",
+      "summary": "2 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-06-03T14:52:22.201Z"
+    }
+  ],
+  "createdAt": "2026-06-03T14:48:22.144Z",
+  "updatedAt": "2026-06-03T15:54:09.224Z"
+}

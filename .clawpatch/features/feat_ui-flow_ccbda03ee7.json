@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_ui-flow_ccbda03ee7",
+  "title": "Apple source Grove/Controllers#1",
+  "summary": "Apple Swift source group Grove/Controllers#1 with 12 files.",
+  "kind": "ui-flow",
+  "source": "apple-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "Grove.xcodeproj",
+      "symbol": "Grove/Controllers#1",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "Grove/Controllers/BatchRenameViewController.swift",
+      "reason": "apple source group Grove/Controllers#1"
+    },
+    {
+      "path": "Grove/Controllers/BrowserWindowController.swift",
+      "reason": "apple source group Grove/Controllers#1"
+    },
+    {
+      "path": "Grove/Controllers/ColumnViewController.swift",
+      "reason": "apple source group Grove/Controllers#1"
+    },
+    {
+      "path": "Grove/Controllers/DualPaneViewController.swift",
+      "reason": "apple source group Grove/Controllers#1"
+    },
+    {
+      "path": "Grove/Controllers/FileListViewController.swift",
+      "reason": "apple source group Grove/Controllers#1"
+    },
+    {
+      "path": "Grove/Controllers/FileProgressViewController.swift",
+      "reason": "apple source group Grove/Controllers#1"
+    },
+    {
+      "path": "Grove/Controllers/FileViewControllerProtocol.swift",
+      "reason": "apple source group Grove/Controllers#1"
+    },
+    {
+      "path": "Grove/Controllers/GalleryViewController.swift",
+      "reason": "apple source group Grove/Controllers#1"
+    },
+    {
+      "path": "Grove/Controllers/GoToFolderPanelController.swift",
+      "reason": "apple source group Grove/Controllers#1"
+    },
+    {
+      "path": "Grove/Controllers/IconViewController.swift",
+      "reason": "apple source group Grove/Controllers#1"
+    },
+    {
+      "path": "Grove/Controllers/InspectorViewController.swift",
+      "reason": "apple source group Grove/Controllers#1"
+    },
+    {
+      "path": "Grove/Controllers/MainSplitViewController.swift",
+      "reason": "apple source group Grove/Controllers#1"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "apple",
+    "swift",
+    "xcode"
+  ],
+  "trustBoundaries": [
+    "filesystem"
+  ],
+  "status": "fixed",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-ui-flow-ccbda03ee7-6bd3_12816092a7",
+    "fnd_sig-feat-ui-flow-ccbda03ee7-2c0c_e3a3cc164c",
+    "fnd_sig-feat-ui-flow-ccbda03ee7-bfe1_6fc6235278",
+    "fnd_sig-feat-ui-flow-ccbda03ee7-8e43_199ec51bbc"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260603T151304-a570ce",
+      "kind": "review",
+      "summary": "4 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-06-03T15:20:45.579Z"
+    }
+  ],
+  "createdAt": "2026-06-03T14:48:22.144Z",
+  "updatedAt": "2026-06-03T15:54:09.224Z"
+}

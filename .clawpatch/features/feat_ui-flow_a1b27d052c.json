@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_ui-flow_a1b27d052c",
+  "title": "Apple source .derivedData",
+  "summary": "Apple Swift source group .derivedData with 11 files.",
+  "kind": "ui-flow",
+  "source": "apple-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "Grove.xcodeproj",
+      "symbol": ".derivedData",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": ".derivedData/Build/Intermediates.noindex/BuildToolPluginIntermediates/aws-sdk-swift.output/InternalAWSCognitoIdentity/SmithyCodeGeneratorPlugin/InternalAWSCognitoIdentityDeserialize.swift",
+      "reason": "apple source group .derivedData"
+    },
+    {
+      "path": ".derivedData/Build/Intermediates.noindex/BuildToolPluginIntermediates/aws-sdk-swift.output/InternalAWSCognitoIdentity/SmithyCodeGeneratorPlugin/InternalAWSCognitoIdentityOperations.swift",
+      "reason": "apple source group .derivedData"
+    },
+    {
+      "path": ".derivedData/Build/Intermediates.noindex/BuildToolPluginIntermediates/aws-sdk-swift.output/InternalAWSCognitoIdentity/SmithyCodeGeneratorPlugin/InternalAWSCognitoIdentitySchemas.swift",
+      "reason": "apple source group .derivedData"
+    },
+    {
+      "path": ".derivedData/Build/Intermediates.noindex/BuildToolPluginIntermediates/aws-sdk-swift.output/InternalAWSCognitoIdentity/SmithyCodeGeneratorPlugin/InternalAWSCognitoIdentitySerialize.swift",
+      "reason": "apple source group .derivedData"
+    },
+    {
+      "path": ".derivedData/Build/Intermediates.noindex/BuildToolPluginIntermediates/aws-sdk-swift.output/InternalAWSCognitoIdentity/SmithyCodeGeneratorPlugin/InternalAWSCognitoIdentityTypeRegistry.swift",
+      "reason": "apple source group .derivedData"
+    },
+    {
+      "path": ".derivedData/Build/Intermediates.noindex/Grove.build/Debug/Grove.build/DerivedSources/GeneratedAssetSymbols.swift",
+      "reason": "apple source group .derivedData"
+    },
+    {
+      "path": ".derivedData/Build/Intermediates.noindex/Grove.build/Release/Grove.build/DerivedSources/GeneratedAssetSymbols.swift",
+      "reason": "apple source group .derivedData"
+    },
+    {
+      "path": ".derivedData/Build/Intermediates.noindex/aws-crt-swift.build/Debug/AwsCommonRuntimeKit.build/DerivedSources/resource_bundle_accessor.swift",
+      "reason": "apple source group .derivedData"
+    },
+    {
+      "path": ".derivedData/Build/Intermediates.noindex/aws-sdk-swift.build/Debug/AWSClientRuntime.build/DerivedSources/resource_bundle_accessor.swift",
+      "reason": "apple source group .derivedData"
+    },
+    {
+      "path": ".derivedData/Build/Intermediates.noindex/smithy-swift.build/Debug/ClientRuntime.build/DerivedSources/resource_bundle_accessor.swift",
+      "reason": "apple source group .derivedData"
+    },
+    {
+      "path": ".derivedData/Build/Intermediates.noindex/smithy-swift.build/Debug/SmithyCodegenCore.build/DerivedSources/resource_bundle_accessor.swift",
+      "reason": "apple source group .derivedData"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "apple",
+    "swift",
+    "xcode"
+  ],
+  "trustBoundaries": [
+    "filesystem"
+  ],
+  "status": "reviewed",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260603T151304-a570ce",
+      "kind": "review",
+      "summary": "0 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-06-03T15:15:35.024Z"
+    }
+  ],
+  "createdAt": "2026-06-03T14:48:22.144Z",
+  "updatedAt": "2026-06-03T15:54:09.224Z"
+}

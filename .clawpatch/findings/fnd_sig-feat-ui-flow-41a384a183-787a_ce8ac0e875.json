@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-41a384a183-787a_ce8ac0e875",
+  "featureId": "feat_ui-flow_41a384a183",
+  "title": "Move-replace rollback can delete the moved source when backup cleanup fails",
+  "category": "data-loss",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Grove/Services/FileOperationService.swift",
+      "startLine": 356,
+      "endLine": 368,
+      "symbol": "FileOperationService.performReplacingTransfer",
+      "quote": "try performTransfer(sourceURL, to: destinationURL, operation: operation)\ntry fileManager.removeItem(at: backupURL)\n... if fileManager.fileExists(atPath: destinationURL.path) { try? fileManager.removeItem(at: destinationURL) }"
+    },
+    {
+      "path": "Grove/Services/FileOperationService.swift",
+      "startLine": 320,
+      "endLine": 327,
+      "symbol": "FileOperationService.transfer",
+      "quote": "case .replace:\n    try performReplacingTransfer(url, to: destinationURL, operation: operation)"
+    },
+    {
+      "path": "GroveTests/FileOperationServiceTests.swift",
+      "startLine": 75,
+      "endLine": 86,
+      "symbol": "FileOperationServiceTests.testReplaceRestoresDestinationWhenIncomingTransferFails",
+      "quote": "XCTAssertThrowsError(try FileOperationService.shared.copyResolvingConflictsWithRecords([missingSource], to: destination) { _ in .replace })"
+    }
+  ],
+  "reasoning": "The do/catch covers both the incoming transfer and the later backup deletion. For a replace move, a successful performTransfer moves the only source copy into destinationURL. If removing backupURL then throws, the catch removes destinationURL before restoring the old backup, which deletes the moved source and reports only a failure.",
+  "reproduction": "Move a file/folder over an existing destination using .replace, with the destination backup made undeletable after it is moved aside; the source is moved into place, backup removal throws, and the catch deletes the moved source while restoring the old destination.",
+  "recommendation": "Separate transfer failure rollback from backup cleanup failure. After the incoming move succeeds, never delete destinationURL just because backup cleanup failed; either leave the successful replacement plus leftover backup and report cleanup, or move destinationURL back to sourceURL before restoring the old destination.",
+  "whyTestsDoNotAlreadyCoverThis": "The existing replace test covers only failure before the incoming transfer succeeds, using copy with a missing source. It does not cover failure from removeItem(at: backupURL) after a successful move.",
+  "suggestedRegressionTest": "Add a moveResolvingConflictsWithRecords .replace test where backup removal fails after source move, using a controlled file-manager abstraction or an undeletable backup directory, and assert the source content still exists either at the destination or restored source path.",
+  "minimumFixScope": "FileOperationService.performReplacingTransfer rollback phase handling for .move replacements.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260603T153237-8f4386",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence path still exists, but the rollback scope has changed. Grove/Services/FileOperationService.swift now performs the incoming transfer inside a do/catch at lines 360-368, and backup cleanup happens afterward in a separate do/catch at lines 370-374 that only logs cleanup failure. Therefore a failed removeItem(at: backupURL) after a successful move no longer enters the rollback block that removes destinationURL. The .replace dispatch at lines 320-327 and the existing incoming-transfer-failure test at GroveTests/FileOperationServiceTests.swift lines 75-86 still exist; that test still does not cover cleanup-after-success, but the current code path no longer has the reported data-loss behavior. I also searched for the same backup/rollback pattern elsewhere and found only this implementation. Targeted tests could not be executed in this read-only sandbox: xcodebuild failed before running tests with Operation not permitted while creating cache/package result files.",
+      "commands": [
+        "git status --short",
+        "rg -n \"performReplacingTransfer|copyResolvingConflictsWithRecords|moveResolvingConflictsWithRecords|testReplaceRestoresDestinationWhenIncomingTransferFails|case \\\\.replace\" Grove GroveTests",
+        "nl -ba Grove/Services/FileOperationService.swift | sed -n '130,390p'",
+        "nl -ba GroveTests/FileOperationServiceTests.swift | sed -n '1,180p'",
+        "rg -n \"grove-replace|replacementBackupURL|moveItem\\\\(at: .*backup|backup.*removeItem|removeItem\\\\(at: destinationURL\\\\)|moveItem\\\\(at: backupURL\" Grove GroveTests",
+        "xcodebuild test -project Grove.xcodeproj -scheme Grove -destination 'platform=macOS' -only-testing:GroveTests/FileOperationServiceTests"
+      ],
+      "createdAt": "2026-06-03T15:39:43.210Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-41a384a183_787ad6ca8d",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260603T151304-a570ce",
+  "createdAt": "2026-06-03T15:17:42.480Z",
+  "updatedAt": "2026-06-03T15:39:43.210Z"
+}

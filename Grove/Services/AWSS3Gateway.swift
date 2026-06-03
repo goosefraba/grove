@@ -4,6 +4,8 @@ import CryptoKit
 #if canImport(AWSS3) && canImport(AWSSDKIdentity)
 import AWSS3
 import AWSSDKIdentity
+import ClientRuntime
+import Smithy
 
 final class AWSS3Gateway: S3Gateway {
     private struct ClientKey: Hashable {
@@ -76,7 +78,92 @@ final class AWSS3Gateway: S3Gateway {
         )
     }
 
+    func uploadObject(request: S3UploadRequest, progress: S3TransferProgressHandler?) async throws -> S3UploadResponse {
+        try Task.checkCancellation()
+        progress?(S3TransferProgress(
+            operation: .upload,
+            fileName: request.sourceURL.lastPathComponent,
+            completedBytes: 0,
+            totalBytes: request.contentLength,
+            completedFiles: 0,
+            totalFiles: 1
+        ))
+
+        let fileHandle = try await Task.detached(priority: .userInitiated) {
+            try FileHandle(forReadingFrom: request.sourceURL)
+        }.value
+        defer {
+            try? fileHandle.close()
+        }
+        try Task.checkCancellation()
+
+        let profile = profile(named: request.location.profileName)
+        let client = try await client(profile: profile, region: request.location.regionOverride)
+        let output = try await client.putObject(input: PutObjectInput(
+            body: .from(fileHandle: fileHandle),
+            bucket: request.bucket,
+            contentLength: Int(request.contentLength),
+            contentType: request.contentType,
+            key: request.key,
+            storageClass: request.storageClass.sdkValue
+        ))
+        try Task.checkCancellation()
+
+        progress?(S3TransferProgress(
+            operation: .upload,
+            fileName: request.sourceURL.lastPathComponent,
+            completedBytes: request.contentLength,
+            totalBytes: request.contentLength,
+            completedFiles: 1,
+            totalFiles: 1
+        ))
+        return S3UploadResponse(eTag: output.eTag)
+    }
+
+    func downloadObject(request: S3DownloadRequest, progress: S3TransferProgressHandler?) async throws -> S3DownloadResponse {
+        try Task.checkCancellation()
+        let profile = profile(named: request.location.profileName)
+        let client = try await client(profile: profile, region: request.location.regionOverride)
+        let output = try await client.getObject(input: GetObjectInput(bucket: request.bucket, key: request.key))
+        try Task.checkCancellation()
+
+        let totalBytes = output.contentLength.map(Int64.init)
+        let fileName = (request.key as NSString).lastPathComponent
+        progress?(S3TransferProgress(
+            operation: .download,
+            fileName: fileName,
+            completedBytes: 0,
+            totalBytes: totalBytes,
+            completedFiles: 0,
+            totalFiles: 1
+        ))
+        try Task.checkCancellation()
+
+        let bytesWritten = try await writeBody(
+            output.body,
+            to: request.temporaryURL,
+            fileName: fileName,
+            totalBytes: totalBytes,
+            progress: progress
+        )
+        try Task.checkCancellation()
+
+        progress?(S3TransferProgress(
+            operation: .download,
+            fileName: fileName,
+            completedBytes: bytesWritten,
+            totalBytes: totalBytes ?? bytesWritten,
+            completedFiles: 1,
+            totalFiles: 1
+        ))
+        return S3DownloadResponse(bytesWritten: bytesWritten)
+    }
+
     private func client(profile: AWSProfile, region: String?) async throws -> S3Client {
+        if profile.hasSSOConfiguration {
+            return try await makeClient(profile: profile, region: region)
+        }
+
         let key = ClientKey(profileName: profile.name, region: region)
         lock.lock()
         let existing = clients[key]
@@ -118,6 +205,49 @@ final class AWSS3Gateway: S3Gateway {
         )
     }
 
+    private func writeBody(
+        _ body: ByteStream?,
+        to destinationURL: URL,
+        fileName: String,
+        totalBytes: Int64?,
+        progress: S3TransferProgressHandler?
+    ) async throws -> Int64 {
+        let parent = destinationURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: destinationURL.path, contents: nil)
+        let fileHandle = try FileHandle(forWritingTo: destinationURL)
+        defer { try? fileHandle.close() }
+
+        var bytesWritten: Int64 = 0
+        switch body {
+        case .data(let data):
+            if let data, !data.isEmpty {
+                try fileHandle.write(contentsOf: data)
+                bytesWritten = Int64(data.count)
+            }
+        case .stream(let stream):
+            if stream.isSeekable {
+                try stream.seek(toOffset: 0)
+            }
+            while let chunk = try await stream.readAsync(upToCount: 1_048_576), !chunk.isEmpty {
+                try Task.checkCancellation()
+                try fileHandle.write(contentsOf: chunk)
+                bytesWritten += Int64(chunk.count)
+                progress?(S3TransferProgress(
+                    operation: .download,
+                    fileName: fileName,
+                    completedBytes: bytesWritten,
+                    totalBytes: totalBytes,
+                    completedFiles: 0,
+                    totalFiles: 1
+                ))
+            }
+        case .noStream, nil:
+            break
+        }
+        return bytesWritten
+    }
+
     private func profile(named name: String?) -> AWSProfile {
         let profileName = name ?? "default"
         return profileStore.profiles().first { $0.name == profileName } ?? AWSProfile(
@@ -154,6 +284,29 @@ final class AWSS3Gateway: S3Gateway {
     private func clean(_ value: String?) -> String? {
         let cleaned = value?.trimmingCharacters(in: .whitespacesAndNewlines)
         return cleaned?.isEmpty == true ? nil : cleaned
+    }
+}
+
+private extension S3StorageClass {
+    var sdkValue: S3ClientTypes.StorageClass {
+        switch self {
+        case .standard:
+            return .standard
+        case .intelligentTiering:
+            return .intelligentTiering
+        case .standardIA:
+            return .standardIa
+        case .oneZoneIA:
+            return .onezoneIa
+        case .glacierInstantRetrieval:
+            return .glacierIr
+        case .glacierFlexibleRetrieval:
+            return .glacier
+        case .deepArchive:
+            return .deepArchive
+        case .reducedRedundancy:
+            return .reducedRedundancy
+        }
     }
 }
 
@@ -356,6 +509,14 @@ final class AWSS3Gateway: S3Gateway {
     }
 
     func headObject(location: S3Location, key: String) async throws -> S3ObjectMetadata {
+        throw S3BrowserError.unknown("AWS SDK for Swift is not linked into this build.")
+    }
+
+    func uploadObject(request: S3UploadRequest, progress: S3TransferProgressHandler?) async throws -> S3UploadResponse {
+        throw S3BrowserError.unknown("AWS SDK for Swift is not linked into this build.")
+    }
+
+    func downloadObject(request: S3DownloadRequest, progress: S3TransferProgressHandler?) async throws -> S3DownloadResponse {
         throw S3BrowserError.unknown("AWS SDK for Swift is not linked into this build.")
     }
 }

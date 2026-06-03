@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260603T151304-a570ce",
+  "command": "review",
+  "args": [
+    "--root",
+    ".",
+    "--no-input",
+    "review",
+    "--limit",
+    "11",
+    "--json"
+  ],
+  "rootPath": "/Users/goosefraba/projects/development/goosefraba/grove",
+  "headSha": "fce8970b54b4b0437efde810abec8a93114c6498",
+  "startedAt": "2026-06-03T15:13:05.023Z",
+  "finishedAt": "2026-06-03T15:20:45.580Z",
+  "status": "completed",
+  "claimedFeatureIds": [
+    "feat_ui-flow_2c88f036ff",
+    "feat_ui-flow_41a384a183",
+    "feat_ui-flow_50591d46c2",
+    "feat_ui-flow_a19422d7d0",
+    "feat_ui-flow_a1b27d052c",
+    "feat_ui-flow_b844266bba",
+    "feat_ui-flow_c861014c6f",
+    "feat_ui-flow_ccbda03ee7"
+  ],
+  "findingIds": [
+    "fnd_sig-feat-ui-flow-a19422d7d0-21fd_27a550b12b",
+    "fnd_sig-feat-ui-flow-b844266bba-1ed4_bfd936d282",
+    "fnd_sig-feat-ui-flow-b844266bba-9511_2869dac837",
+    "fnd_sig-feat-ui-flow-b844266bba-f4dc_60dc173713",
+    "fnd_sig-feat-ui-flow-2c88f036ff-bfd8_a019d3261c",
+    "fnd_sig-feat-ui-flow-41a384a183-787a_ce8ac0e875",
+    "fnd_sig-feat-ui-flow-41a384a183-2cf3_5b2522e938",
+    "fnd_sig-feat-ui-flow-41a384a183-9e52_14b7bbec71",
+    "fnd_sig-feat-ui-flow-ccbda03ee7-6bd3_12816092a7",
+    "fnd_sig-feat-ui-flow-ccbda03ee7-2c0c_e3a3cc164c",
+    "fnd_sig-feat-ui-flow-ccbda03ee7-bfe1_6fc6235278",
+    "fnd_sig-feat-ui-flow-ccbda03ee7-8e43_199ec51bbc"
+  ],
+  "patchAttemptIds": [],
+  "errors": []
+}

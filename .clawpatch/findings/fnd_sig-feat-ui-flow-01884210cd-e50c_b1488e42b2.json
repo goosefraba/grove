@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-01884210cd-e50c_b1488e42b2",
+  "featureId": "feat_ui-flow_01884210cd",
+  "title": "Closing a window persists its state before removing it from restoration",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Grove/App/AppDelegate.swift",
+      "startLine": 75,
+      "endLine": 79,
+      "symbol": "AppDelegate.windowDidClose(_:)",
+      "quote": "saveWindowStates()\nwindowControllers.removeAll { $0.window === window }"
+    },
+    {
+      "path": "Grove/App/AppDelegate.swift",
+      "startLine": 83,
+      "endLine": 85,
+      "symbol": "AppDelegate.saveWindowStates()",
+      "quote": "let states = windowControllers.map { $0.saveState() }\nUserDefaults.standard.set(states, forKey: BrowserWindowController.windowStatesKey)"
+    }
+  ],
+  "reasoning": "The close notification handler writes the restoration list while the just-closing controller is still in windowControllers. That leaves UserDefaults containing a closed window until a later save happens. Normal Quit may overwrite it, but if the app is relaunched after an unexpected exit or after the process is killed while no later save ran, the closed window can be restored.",
+  "reproduction": "Open a Grove window, close it, and inspect the windowStates UserDefaults value before applicationWillTerminate runs; it still contains the closed window's saved state.",
+  "recommendation": "Remove the closing controller from windowControllers before calling saveWindowStates(), and consider filtering for controllers with non-nil, non-closing windows when saving.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked AppDelegate/window-restoration tests were provided, and the existing discovered tests focus on storage, navigation history, and BrowserWindowController capability validation.",
+  "suggestedRegressionTest": "Add an AppDelegate restoration test that registers a BrowserWindowController, simulates its close notification, and asserts the persisted windowStates no longer includes that controller.",
+  "minimumFixScope": "AppDelegate.windowDidClose(_:) ordering plus a focused window-state persistence test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260603T145748-41c449",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence path still exists, but the cited behavior no longer exists in the current code. In Grove/App/AppDelegate.swift, windowDidClose(_:) now removes the closing controller at line 75 before calling saveWindowStates() at line 76. saveWindowStates() also prunes controllers whose window is nil at line 82 before mapping states at lines 83-84. Repo-wide search found no alternate AppDelegate/windowStates save path preserving the old ordering. No AppDelegate/window-restoration regression test was found in GroveTests; xcodebuild test could not execute because the read-only sandbox prevented Xcode temp/cache/result-bundle writes during package resolution, so the classification is based on current code and static test-surface evidence.",
+      "commands": [
+        "pwd",
+        "git status --short",
+        "rg -n \"grove|AppDelegate|windowDidClose|windowStates\" /Users/goosefraba/.codex/memories/MEMORY.md",
+        "rg -n \"windowDidClose|saveWindowStates|windowStatesKey|windowControllers\" Grove -g '*.swift'",
+        "nl -ba Grove/App/AppDelegate.swift",
+        "git diff -- Grove/App/AppDelegate.swift",
+        "rg -n \"windowStates|windowDidClose|saveWindowStates|AppDelegate\" GroveTests Grove -g '*.swift'",
+        "ls",
+        "xcodebuild -list -project Grove.xcodeproj",
+        "xcodebuild test -project Grove.xcodeproj -scheme Grove -destination 'platform=macOS'"
+      ],
+      "createdAt": "2026-06-03T15:04:56.011Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-01884210cd_e50cd21ee2",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260603T144837-9df936",
+  "createdAt": "2026-06-03T14:52:22.200Z",
+  "updatedAt": "2026-06-03T15:04:56.011Z"
+}

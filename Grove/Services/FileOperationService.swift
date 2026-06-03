@@ -359,13 +359,18 @@ final class FileOperationService {
         try fileManager.moveItem(at: destinationURL, to: backupURL)
         do {
             try performTransfer(sourceURL, to: destinationURL, operation: operation)
-            try fileManager.removeItem(at: backupURL)
         } catch {
             if fileManager.fileExists(atPath: destinationURL.path) {
                 try? fileManager.removeItem(at: destinationURL)
             }
             try? fileManager.moveItem(at: backupURL, to: destinationURL)
             throw error
+        }
+
+        do {
+            try fileManager.removeItem(at: backupURL)
+        } catch {
+            Self.logger.error("Unable to remove replacement backup after successful transfer: \(backupURL.path, privacy: .public)")
         }
     }
 
@@ -620,26 +625,51 @@ final class FileOperationService {
     func computeChecksum(for url: URL, algorithm: ChecksumAlgorithm, completion: @escaping (Result<String, Error>) -> Void) {
         backgroundQueue.async {
             do {
-                let data = try Data(contentsOf: url)
-                let hex: String
-                switch algorithm {
-                case .md5:
-                    var digest = [UInt8](repeating: 0, count: Int(CC_MD5_DIGEST_LENGTH))
-                    data.withUnsafeBytes { buffer in
-                        _ = CC_MD5(buffer.baseAddress, CC_LONG(data.count), &digest)
-                    }
-                    hex = digest.map { String(format: "%02x", $0) }.joined()
-                case .sha256:
-                    var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-                    data.withUnsafeBytes { buffer in
-                        _ = CC_SHA256(buffer.baseAddress, CC_LONG(data.count), &digest)
-                    }
-                    hex = digest.map { String(format: "%02x", $0) }.joined()
-                }
+                let hex = try Self.streamingChecksum(for: url, algorithm: algorithm)
                 DispatchQueue.main.async { completion(.success(hex)) }
             } catch {
                 DispatchQueue.main.async { completion(.failure(error)) }
             }
+        }
+    }
+
+    private static func streamingChecksum(for url: URL, algorithm: ChecksumAlgorithm) throws -> String {
+        let fileHandle = try FileHandle(forReadingFrom: url)
+        defer { try? fileHandle.close() }
+
+        switch algorithm {
+        case .md5:
+            var context = CC_MD5_CTX()
+            CC_MD5_Init(&context)
+            try updateDigest(from: fileHandle) { data in
+                data.withUnsafeBytes { buffer in
+                    _ = CC_MD5_Update(&context, buffer.baseAddress, CC_LONG(buffer.count))
+                }
+            }
+            var digest = [UInt8](repeating: 0, count: Int(CC_MD5_DIGEST_LENGTH))
+            CC_MD5_Final(&digest, &context)
+            return digest.map { String(format: "%02x", $0) }.joined()
+        case .sha256:
+            var context = CC_SHA256_CTX()
+            CC_SHA256_Init(&context)
+            try updateDigest(from: fileHandle) { data in
+                data.withUnsafeBytes { buffer in
+                    _ = CC_SHA256_Update(&context, buffer.baseAddress, CC_LONG(buffer.count))
+                }
+            }
+            var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+            CC_SHA256_Final(&digest, &context)
+            return digest.map { String(format: "%02x", $0) }.joined()
+        }
+    }
+
+    private static func updateDigest(from fileHandle: FileHandle, update: (Data) -> Void) throws {
+        while true {
+            let data = fileHandle.readData(ofLength: 1_048_576)
+            if data.isEmpty {
+                return
+            }
+            update(data)
         }
     }
 

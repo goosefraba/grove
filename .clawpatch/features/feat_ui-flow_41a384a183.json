@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_ui-flow_41a384a183",
+  "title": "Apple source Grove/Services",
+  "summary": "Apple Swift source group Grove/Services with 8 files.",
+  "kind": "ui-flow",
+  "source": "apple-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "Grove.xcodeproj",
+      "symbol": "Grove/Services",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "Grove/Services/AWSProfileStore.swift",
+      "reason": "apple source group Grove/Services"
+    },
+    {
+      "path": "Grove/Services/AWSS3Gateway.swift",
+      "reason": "apple source group Grove/Services"
+    },
+    {
+      "path": "Grove/Services/DirectoryWatcher.swift",
+      "reason": "apple source group Grove/Services"
+    },
+    {
+      "path": "Grove/Services/FileOperationService.swift",
+      "reason": "apple source group Grove/Services"
+    },
+    {
+      "path": "Grove/Services/FolderSizeService.swift",
+      "reason": "apple source group Grove/Services"
+    },
+    {
+      "path": "Grove/Services/S3BrowserService.swift",
+      "reason": "apple source group Grove/Services"
+    },
+    {
+      "path": "Grove/Services/SearchService.swift",
+      "reason": "apple source group Grove/Services"
+    },
+    {
+      "path": "Grove/Services/ThumbnailCache.swift",
+      "reason": "apple source group Grove/Services"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "GroveTests/AWSProfileStoreTests.swift",
+      "reason": "associated apple test"
+    },
+    {
+      "path": "GroveTests/FileOperationServiceTests.swift",
+      "reason": "associated apple test"
+    },
+    {
+      "path": "GroveTests/S3BrowserServiceTests.swift",
+      "reason": "associated apple test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "GroveTests/AWSProfileStoreTests.swift",
+      "command": null
+    },
+    {
+      "path": "GroveTests/FileOperationServiceTests.swift",
+      "command": null
+    },
+    {
+      "path": "GroveTests/S3BrowserServiceTests.swift",
+      "command": null
+    }
+  ],
+  "tags": [
+    "apple",
+    "swift",
+    "xcode"
+  ],
+  "trustBoundaries": [
+    "filesystem"
+  ],
+  "status": "fixed",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-ui-flow-41a384a183-787a_ce8ac0e875",
+    "fnd_sig-feat-ui-flow-41a384a183-2cf3_5b2522e938",
+    "fnd_sig-feat-ui-flow-41a384a183-9e52_14b7bbec71"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260603T151304-a570ce",
+      "kind": "review",
+      "summary": "3 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-06-03T15:17:42.481Z"
+    }
+  ],
+  "createdAt": "2026-06-03T14:48:22.144Z",
+  "updatedAt": "2026-06-03T15:54:09.224Z"
+}

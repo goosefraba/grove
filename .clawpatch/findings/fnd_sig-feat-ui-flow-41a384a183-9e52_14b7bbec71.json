@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-41a384a183-9e52_14b7bbec71",
+  "featureId": "feat_ui-flow_41a384a183",
+  "title": "Cached S3 clients keep stale SSO role credentials after external refresh",
+  "category": "api-contract",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "Grove/Services/AWSS3Gateway.swift",
+      "startLine": 15,
+      "endLine": 17,
+      "symbol": "AWSS3Gateway.clients",
+      "quote": "private var clients: [ClientKey: S3Client] = [:]"
+    },
+    {
+      "path": "Grove/Services/AWSS3Gateway.swift",
+      "startLine": 158,
+      "endLine": 171,
+      "symbol": "AWSS3Gateway.client",
+      "quote": "if let existing {\n    return existing\n}\n...\nclients[key] = created"
+    },
+    {
+      "path": "Grove/Services/AWSS3Gateway.swift",
+      "startLine": 184,
+      "endLine": 192,
+      "symbol": "AWSS3Gateway.makeClient",
+      "quote": "let identity = try await NoRefreshSSOCredentialProvider(profileStore: profileStore).resolve(profileName: profile.name)\nlet resolver = try StaticAWSCredentialIdentityResolver(identity)"
+    },
+    {
+      "path": "Grove/Services/AWSS3Gateway.swift",
+      "startLine": 306,
+      "endLine": 311,
+      "symbol": "NoRefreshSSOCredentialProvider.resolve",
+      "quote": "expiration: roleCredentials.expiration.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }"
+    }
+  ],
+  "reasoning": "The gateway resolves SSO role credentials once, wraps them in a static resolver, and caches the S3Client by profile and region forever. When those role credentials expire, refreshing SSO outside Grove does not help existing clients because later calls return the cached client and never re-read the token cache or role credentials.",
+  "reproduction": "Use an SSO profile until its role credentials expire, refresh the profile outside Grove, then retry the same profile/region in the same app session; AWSS3Gateway.client returns the previously cached S3Client instead of constructing one from fresh role credentials.",
+  "recommendation": "Do not cache clients backed by expiring SSO identities indefinitely. Include credential expiration in the cache policy, invalidate clients on credential errors, or use a credential resolver that re-reads valid cached SSO credentials without initiating login.",
+  "whyTestsDoNotAlreadyCoverThis": "AWSProfileStoreTests exercise NoRefreshSSOCredentialProvider directly and S3BrowserServiceTests use MockS3Gateway. No test instantiates AWSS3Gateway or verifies cached-client behavior across SSO role credential expiration and external refresh.",
+  "suggestedRegressionTest": "Add an AWSS3Gateway-level test with injectable client/provider factories that returns short-lived SSO credentials, advances time past expiration, refreshes the provider output, and asserts a new client or fresh identity is used for the next request.",
+  "minimumFixScope": "AWSS3Gateway client cache policy and SSO credential resolver wiring.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260603T153237-8f4386",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "Original evidence path Grove/Services/AWSS3Gateway.swift still exists and the cache field is still present at line 17, but current AWSS3Gateway.client now short-circuits SSO profiles at lines 162-165 with `if profile.hasSSOConfiguration { return try await makeClient(...) }`. The cached-client lookup/store at lines 167-179 is therefore only reachable for non-SSO profiles. SSO still resolves role credentials into a StaticAWSCredentialIdentityResolver in makeClient at lines 192-200, and the provider still maps credential expiration at lines 357-362, but because SSO clients are no longer cached, a later request after external SSO refresh will construct a new S3Client and re-read the cached SSO token/role credentials. I did not find another SSO client cache path in the repository. Existing AWSProfileStoreTests cover NoRefreshSSOCredentialProvider behavior, but no AWSS3Gateway cache regression test exists. The attempted xcodebuild test could not run in this read-only sandbox because xcodebuild could not create cache/result files and could not resolve package dependencies; this appears environmental, not a test failure.",
+      "commands": [
+        "rg -n \"clients|func client|makeClient|NoRefreshSSOCredentialProvider|StaticAWSCredentialIdentityResolver|expiration\" Grove/Services/AWSS3Gateway.swift",
+        "sed -n '1,240p' Grove/Services/AWSS3Gateway.swift",
+        "sed -n '240,380p' Grove/Services/AWSS3Gateway.swift",
+        "rg -n \"AWSS3Gateway|NoRefreshSSOCredentialProvider|credential|SSO|S3Client|clients\\[|invalidate|expiration|StaticAWSCredentialIdentityResolver\" Grove Tests . --glob '!*.xcworkspace/**' --glob '!*.xcodeproj/**'",
+        "rg --files",
+        "sed -n '1,220p' GroveTests/AWSProfileStoreTests.swift",
+        "sed -n '1,220p' GroveTests/S3BrowserServiceTests.swift",
+        "xcodebuild -list",
+        "nl -ba Grove/Services/AWSS3Gateway.swift | sed -n '1,210p'",
+        "nl -ba Grove/Services/AWSS3Gateway.swift | sed -n '300,370p'",
+        "nl -ba GroveTests/AWSProfileStoreTests.swift | sed -n '55,150p'",
+        "git status --short",
+        "xcodebuild test -scheme Grove -destination 'platform=macOS' -only-testing:GroveTests/AWSProfileStoreTests"
+      ],
+      "createdAt": "2026-06-03T15:41:00.305Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-41a384a183_9e52b3cfeb",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260603T151304-a570ce",
+  "createdAt": "2026-06-03T15:17:42.480Z",
+  "updatedAt": "2026-06-03T15:41:00.305Z"
+}

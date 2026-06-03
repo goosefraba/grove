@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-ccbda03ee7-2c0c_e3a3cc164c",
+  "featureId": "feat_ui-flow_ccbda03ee7",
+  "title": "Async navigation leaves stale file rows actionable under the new location",
+  "category": "data-loss",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Grove/Controllers/FileListViewController.swift",
+      "startLine": 418,
+      "endLine": 434,
+      "symbol": "FileListViewController.loadDirectory",
+      "quote": null
+    },
+    {
+      "path": "Grove/Controllers/FileListViewController.swift",
+      "startLine": 489,
+      "endLine": 502,
+      "symbol": "FileListViewController.reloadContents",
+      "quote": null
+    },
+    {
+      "path": "Grove/Controllers/FileListViewController.swift",
+      "startLine": 646,
+      "endLine": 650,
+      "symbol": "FileListViewController.selectedItems",
+      "quote": null
+    },
+    {
+      "path": "Grove/Controllers/IconViewController.swift",
+      "startLine": 113,
+      "endLine": 122,
+      "symbol": "IconViewController.loadDirectory",
+      "quote": null
+    },
+    {
+      "path": "Grove/Controllers/GalleryViewController.swift",
+      "startLine": 148,
+      "endLine": 157,
+      "symbol": "GalleryViewController.loadDirectory",
+      "quote": null
+    }
+  ],
+  "reasoning": "The list, icon, and gallery controllers update currentURL and start an async directory load without first clearing the old items or disabling commands. In FileListViewController, assigning filterText immediately reapplies the previous allItems before the async callback replaces them. During that window the UI can show and operate on files from the old folder while the controller state already says it is in the new folder, so destructive commands can target stale selectedItems.",
+  "reproduction": "Select a file in folder A, navigate to a slow or unreadable folder B, then quickly invoke an action such as Move to Trash before the async load callback runs. The selection still comes from A while the browser has already navigated to B.",
+  "recommendation": "On loadDirectory, clear items/allItems and selection immediately, reload the view, show a loading/empty state, and disable file actions until the matching generation completes. Do the same for icon and gallery views before starting contentsOfDirectoryAsync.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked controller tests cover navigation while directory loading is pending or verify that stale rows are cleared before async results arrive.",
+  "suggestedRegressionTest": "Add a controller-level test with a delayed directory loader: navigate from a populated folder to another URL and assert rows and selectedItems are empty or actions disabled before the delayed result is delivered.",
+  "minimumFixScope": "Update FileListViewController, IconViewController, and GalleryViewController directory-loading state transitions.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260603T153237-8f4386",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence files still exist, with some line shifts. In the current worktree, FileListViewController.loadDirectory now clears loaded state before starting the async load: clearLoadedItemsForPendingLoad empties allItems/items, deselects the table, reloads it, updates status, and notifies the delegate with an empty selection. reloadContents also uses loadGeneration plus request URL/showHidden guards before applying async results. IconViewController and GalleryViewController now do the same kind of pending-load clear and generation-guarded async callback. selectedItems now reads from emptied item arrays during the pending load, and destructive actions such as deleteSelectedFiles still guard on an empty URL list, so stale rows from the previous folder are no longer actionable after navigation returns to the event loop. No controller regression test for this specific stale-navigation case was found. I attempted the Xcode test suite, but the read-only sandbox prevented xcodebuild from creating /tmp/DerivedData, package, log, and result-bundle files, so tests could not run in this environment.",
+      "commands": [
+        "pwd && git status --short && rg -n \"func loadDirectory|func reloadContents|var selectedItems|contentsOfDirectoryAsync|filterText\" Grove/Controllers/FileListViewController.swift Grove/Controllers/IconViewController.swift Grove/Controllers/GalleryViewController.swift",
+        "rg -n \"loadDirectory\\(|selectedItems|Move to Trash|moveToTrash|trash|delete|FileOperationService|isLoading|generation|loading|allItems|items\\.removeAll|allItems\\.removeAll|reloadData\\(\\)\" Grove Tests -g '*.swift'",
+        "rg --files",
+        "nl -ba Grove/Controllers/FileListViewController.swift | sed -n '100,140p;330,390p;410,535p;650,705p;785,820p;1148,1178p'",
+        "nl -ba Grove/Controllers/IconViewController.swift | sed -n '1,60p;100,205p;235,270p;300,330p'",
+        "nl -ba Grove/Controllers/GalleryViewController.swift | sed -n '1,60p;140,245p;285,340p'",
+        "nl -ba Grove/Controllers/FileViewControllerProtocol.swift | sed -n '1,120p;120,190p'",
+        "nl -ba Grove/Controllers/FileListViewController.swift | sed -n '520,625p;980,1010p;1328,1360p;1428,1445p'",
+        "rg -n \"clearLoadedItemsForPendingLoad|loadGeneration|preserveSelection: false|Loading folder contents|stale|directory load|loadDirectory\" GroveTests Grove -g '*.swift'",
+        "nl -ba Grove/App/AppDelegate.swift | sed -n '130,150p;270,300p' && nl -ba Grove/Controllers/BrowserWindowController.swift | sed -n '480,570p'",
+        "xcodebuild test -project Grove.xcodeproj -scheme Grove -destination 'platform=macOS' -derivedDataPath /tmp/grove-derived-data CODE_SIGNING_ALLOWED=NO"
+      ],
+      "createdAt": "2026-06-03T15:49:04.822Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-ccbda03ee7_2c0c85ba65",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260603T151304-a570ce",
+  "createdAt": "2026-06-03T15:20:45.575Z",
+  "updatedAt": "2026-06-03T15:49:04.822Z"
+}

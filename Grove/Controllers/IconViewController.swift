@@ -113,13 +113,14 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
     func loadDirectory(_ url: URL) {
         reloadWorkItem?.cancel()
         currentURL = url
+        clearLoadedItemsForPendingLoad(message: "Loading folder contents...")
 
         watcher?.stop()
         watcher = DirectoryWatcher(url: url) { [weak self] _ in
             self?.scheduleReload()
         }
 
-        reloadContents()
+        reloadContents(preserveSelection: false)
     }
 
     private func scheduleReload() {
@@ -131,12 +132,12 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
     }
 
-    private func reloadContents() {
+    private func reloadContents(preserveSelection: Bool = true) {
         loadGeneration += 1
         let generation = loadGeneration
         let requestURL = currentURL.standardizedFileURL
         let requestShowHiddenFiles = showHiddenFiles
-        let selectedURLs = Set(selectedItems.map(\.url))
+        let selectedURLs = preserveSelection ? Set(selectedItems.map(\.url)) : []
 
         FileOperationService.shared.contentsOfDirectoryAsync(at: requestURL, showHidden: requestShowHiddenFiles) { [weak self] result in
             guard let self = self,
@@ -166,6 +167,16 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
                 self.emptyLabel.isHidden = false
             }
         }
+    }
+
+    private func clearLoadedItemsForPendingLoad(message: String) {
+        items = []
+        collectionView.selectionIndexPaths = []
+        collectionView.reloadData()
+        updateStatusBar()
+        delegate?.fileListDidSelect(items: [])
+        emptyLabel.stringValue = message
+        emptyLabel.isHidden = false
     }
 
     private func sortItems() {
@@ -276,14 +287,14 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
         // If dropping on a specific item, only accept if it's a navigable directory
         if proposedDropOperation.pointee == .on {
             if index < items.count && items[index].isDirectory && !items[index].isPackage {
-                return draggingInfo.draggingSourceOperationMask.contains(.move) ? .move : .copy
+                return FileDropOperationResolver.preferredOperation(from: draggingInfo.draggingSourceOperationMask)
             }
             // Re-target to the whole collection (drop into current directory)
             proposedDropOperation.pointee = .before
-            return draggingInfo.draggingSourceOperationMask.contains(.move) ? .move : .copy
+            return FileDropOperationResolver.preferredOperation(from: draggingInfo.draggingSourceOperationMask)
         }
 
-        return draggingInfo.draggingSourceOperationMask.contains(.move) ? .move : .copy
+        return FileDropOperationResolver.preferredOperation(from: draggingInfo.draggingSourceOperationMask)
     }
 
     func collectionView(_ collectionView: NSCollectionView, acceptDrop draggingInfo: any NSDraggingInfo, indexPath: IndexPath, dropOperation: NSCollectionView.DropOperation) -> Bool {
@@ -300,7 +311,9 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
         do {
             let conflictPrompt = FileConflictResolutionPrompt(window: view.window)
             let records: [FileOperationService.FileTransferRecord]
-            if draggingInfo.draggingSourceOperationMask.contains(.move) {
+            let operation = FileDropOperationResolver.preferredOperation(from: draggingInfo.draggingSourceOperationMask)
+            let isMove = FileDropOperationResolver.isMove(operation)
+            if isMove {
                 records = try FileOperationService.shared.moveResolvingConflictsWithRecords(urls, to: destination) { conflict in
                     conflictPrompt.resolve(conflict)
                 }
@@ -309,11 +322,12 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
                     conflictPrompt.resolve(conflict)
                 }
             }
-            registerUndoTransfer(records: records, actionName: draggingInfo.draggingSourceOperationMask.contains(.move) ? "Move" : "Copy")
+            registerUndoTransfer(records: records, actionName: isMove ? "Move" : "Copy")
             reloadContents()
             return true
         } catch FileOperationService.FileOperationError.partialFailure(let records, let underlying) {
-            registerUndoTransfer(records: records, actionName: draggingInfo.draggingSourceOperationMask.contains(.move) ? "Move" : "Copy")
+            let isMove = FileDropOperationResolver.isMove(FileDropOperationResolver.preferredOperation(from: draggingInfo.draggingSourceOperationMask))
+            registerUndoTransfer(records: records, actionName: isMove ? "Move" : "Copy")
             showError(underlying)
             return false
         } catch {

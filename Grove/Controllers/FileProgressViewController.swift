@@ -8,6 +8,8 @@ final class FileProgressViewController: NSViewController {
 
     private let cancellationLock = NSLock()
     private var cancelled = false
+    private var operationVerb = "Copying"
+    var onCancel: (() -> Void)?
 
     var isCancelled: Bool {
         cancellationLock.lock()
@@ -59,7 +61,11 @@ final class FileProgressViewController: NSViewController {
 
     func updateProgress(_ value: Double, fileName: String) {
         progressBar.doubleValue = value
-        fileNameLabel.stringValue = fileName.isEmpty ? "Completing..." : "Copying \"\(fileName)\"..."
+        fileNameLabel.stringValue = fileName.isEmpty ? "Completing..." : "\(operationVerb) \"\(fileName)\"..."
+    }
+
+    func configure(operationVerb: String) {
+        self.operationVerb = operationVerb
     }
 
     @objc private func cancelClicked(_ sender: Any?) {
@@ -68,5 +74,6 @@ final class FileProgressViewController: NSViewController {
         cancellationLock.unlock()
         cancelButton.isEnabled = false
         cancelButton.title = "Cancelling..."
+        onCancel?()
     }
 }

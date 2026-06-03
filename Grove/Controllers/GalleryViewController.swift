@@ -148,13 +148,14 @@ final class GalleryViewController: NSViewController, FileViewControllerProtocol,
     func loadDirectory(_ url: URL) {
         reloadWorkItem?.cancel()
         currentURL = url
+        clearLoadedItemsForPendingLoad(message: "Loading folder contents...")
 
         watcher?.stop()
         watcher = DirectoryWatcher(url: url) { [weak self] _ in
             self?.scheduleReload()
         }
 
-        reloadContents()
+        reloadContents(preserveSelection: false)
     }
 
     private func scheduleReload() {
@@ -166,12 +167,12 @@ final class GalleryViewController: NSViewController, FileViewControllerProtocol,
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
     }
 
-    private func reloadContents() {
+    private func reloadContents(preserveSelection: Bool = true) {
         loadGeneration += 1
         let generation = loadGeneration
         let requestURL = currentURL.standardizedFileURL
         let requestShowHiddenFiles = showHiddenFiles
-        let selectedURL = selectedItems.first?.url
+        let selectedURL = preserveSelection ? selectedItems.first?.url : nil
 
         FileOperationService.shared.contentsOfDirectoryAsync(at: requestURL, showHidden: requestShowHiddenFiles) { [weak self] result in
             guard let self = self,
@@ -208,6 +209,18 @@ final class GalleryViewController: NSViewController, FileViewControllerProtocol,
                 self.emptyLabel.isHidden = false
             }
         }
+    }
+
+    private func clearLoadedItemsForPendingLoad(message: String) {
+        items = []
+        currentPreviewIndex = -1
+        previewImageView.image = nil
+        filmstripCollectionView.selectionIndexPaths = []
+        filmstripCollectionView.reloadData()
+        updateStatusBar()
+        delegate?.fileListDidSelect(items: [])
+        emptyLabel.stringValue = message
+        emptyLabel.isHidden = false
     }
 
     private func sortItems() {

@@ -239,6 +239,15 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
         var customFavs = SidebarItem.customFavorites
         let allFavorites = items[.favorites] ?? []
+        let builtInCount = SidebarItem.builtInFavorites.count
+        var customTargetIndex: Int
+        if targetIndex < 0 {
+            customTargetIndex = customFavs.count
+        } else {
+            customTargetIndex = targetIndex - builtInCount
+            if customTargetIndex < 0 { customTargetIndex = 0 }
+            if customTargetIndex > customFavs.count { customTargetIndex = customFavs.count }
+        }
 
         for url in urls {
             var isDir: ObjCBool = false
@@ -261,7 +270,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 section: .favorites,
                 isBuiltIn: false
             )
-            customFavs.append(newItem)
+            customFavs.insert(newItem, at: customTargetIndex)
+            customTargetIndex += 1
         }
 
         SidebarItem.saveCustomFavorites(customFavs)

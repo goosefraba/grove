@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_ui-flow_a19422d7d0",
+  "title": "Apple source Grove/Views",
+  "summary": "Apple Swift source group Grove/Views with 3 files.",
+  "kind": "ui-flow",
+  "source": "apple-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "Grove.xcodeproj",
+      "symbol": "Grove/Views",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "Grove/Views/InspectorView.swift",
+      "reason": "apple source group Grove/Views"
+    },
+    {
+      "path": "Grove/Views/PathBarView.swift",
+      "reason": "apple source group Grove/Views"
+    },
+    {
+      "path": "Grove/Views/TagView.swift",
+      "reason": "apple source group Grove/Views"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "apple",
+    "swift",
+    "xcode"
+  ],
+  "trustBoundaries": [
+    "filesystem"
+  ],
+  "status": "fixed",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-ui-flow-a19422d7d0-21fd_27a550b12b"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260603T151304-a570ce",
+      "kind": "review",
+      "summary": "1 finding(s)",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-06-03T15:15:59.283Z"
+    }
+  ],
+  "createdAt": "2026-06-03T14:48:22.144Z",
+  "updatedAt": "2026-06-03T15:54:09.224Z"
+}

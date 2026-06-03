@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-b844266bba-1ed4_bfd936d282",
+  "featureId": "feat_ui-flow_b844266bba",
+  "title": "No-profile S3 startup error is immediately overwritten",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Grove/Controllers/S3BrowserViewController.swift",
+      "startLine": 121,
+      "endLine": 122,
+      "symbol": "viewDidLoad",
+      "quote": "reloadProfiles()\n        renderIdleState()"
+    },
+    {
+      "path": "Grove/Controllers/S3BrowserViewController.swift",
+      "startLine": 403,
+      "endLine": 407,
+      "symbol": "reloadProfiles",
+      "quote": "if profiles.isEmpty {\n            browseButton.isEnabled = false\n            updateActionAvailability()\n            showInlineError(.noProfiles)\n            return\n        }"
+    },
+    {
+      "path": "Grove/Controllers/S3BrowserViewController.swift",
+      "startLine": 905,
+      "endLine": 920,
+      "symbol": "renderIdleState",
+      "quote": "showInlineMessage(\"Choose a profile and region to list buckets, or enter a bucket manually.\")"
+    }
+  ],
+  "reasoning": "When no AWS profiles are configured, reloadProfiles correctly shows the noProfiles error, but viewDidLoad always calls renderIdleState immediately afterward. renderIdleState clears lastError, hides retry/details, and replaces the actionable error with a generic idle prompt, so a first-run user loses the real setup failure.",
+  "reproduction": "Launch the S3 browser on a machine/user account with no AWS profiles. The controller calls showInlineError(.noProfiles) and then immediately replaces it with the idle message.",
+  "recommendation": "Only render the idle state when profiles were loaded, or have reloadProfiles return a state/result so viewDidLoad does not overwrite terminal setup errors.",
+  "whyTestsDoNotAlreadyCoverThis": "The included BrowserCapabilityTests cover S3 menus and region helpers, and S3BrowserServiceTests cover service/transfer behavior; there is no controller startup test for an empty AWSProfileStore.",
+  "suggestedRegressionTest": "Add a controller-level test with an injected empty AWSProfileStore that calls viewDidLoad/loadViewIfNeeded and asserts the status label or error state still reports no profiles after startup.",
+  "minimumFixScope": "S3BrowserViewController.viewDidLoad/reloadProfiles startup flow.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260603T153237-8f4386",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence path still exists, but the startup flow has changed. In Grove/Controllers/S3BrowserViewController.swift, viewDidLoad now calls renderIdleState() only inside if reloadProfiles() returns true. reloadProfiles() now returns false immediately after showInlineError(.noProfiles) when profiles.isEmpty, so the no-profile error is no longer immediately overwritten by the idle message. showInlineError also preserves lastError and sets the status/empty labels to the error text. I found no controller-level regression test for this exact startup state; the relevant existing tests cover profile parsing, S3 service behavior, and capability helpers. Attempting xcodebuild test was blocked by the read-only sandbox because Xcode could not create cache/log/SourcePackages files under /tmp, so the classification is based on current code flow plus test coverage inspection.",
+      "commands": [
+        "rg -n \"reloadProfiles\\(|renderIdleState\\(|showInlineError\\(\\.noProfiles\\)|showInlineMessage\\(\" Grove/Controllers/S3BrowserViewController.swift",
+        "rg -n \"S3BrowserViewController|AWSProfileStore|noProfiles|renderIdleState|reloadProfiles\" .",
+        "git status --short",
+        "nl -ba Grove/Controllers/S3BrowserViewController.swift | sed -n '100,135p'",
+        "nl -ba Grove/Controllers/S3BrowserViewController.swift | sed -n '388,435p'",
+        "nl -ba Grove/Controllers/S3BrowserViewController.swift | sed -n '896,925p'",
+        "nl -ba GroveTests/AWSProfileStoreTests.swift | sed -n '1,170p'",
+        "xcodebuild -list -project Grove.xcodeproj",
+        "rg -n \"viewDidLoad|loadViewIfNeeded|s3StatusLabel|No AWS profiles|no profiles|noProfiles|AWSProfileStore\\(configURL\" GroveTests",
+        "nl -ba Grove/Services/S3BrowserService.swift | sed -n '180,215p'",
+        "nl -ba Grove/Controllers/S3BrowserViewController.swift | sed -n '925,980p'",
+        "nl -ba GroveTests/BrowserCapabilityTests.swift | sed -n '1,90p'",
+        "nl -ba GroveTests/S3BrowserServiceTests.swift | sed -n '1,110p'",
+        "git diff -- Grove/Controllers/S3BrowserViewController.swift GroveTests",
+        "xcodebuild test -project Grove.xcodeproj -scheme Grove -destination 'platform=macOS' -derivedDataPath /tmp/grove-derived-data-clawpatch-revalidate"
+      ],
+      "createdAt": "2026-06-03T15:45:05.268Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-b844266bba_1ed471eb0e",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260603T151304-a570ce",
+  "createdAt": "2026-06-03T15:17:19.977Z",
+  "updatedAt": "2026-06-03T15:45:05.268Z"
+}

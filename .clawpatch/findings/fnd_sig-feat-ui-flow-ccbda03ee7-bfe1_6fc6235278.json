@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-ui-flow-ccbda03ee7-bfe1_6fc6235278",
+  "featureId": "feat_ui-flow_ccbda03ee7",
+  "title": "Drop handlers turn any source that allows move into an actual move",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "Grove/Controllers/FileListViewController.swift",
+      "startLine": 1005,
+      "endLine": 1020,
+      "symbol": "FileListViewController table drop handling",
+      "quote": null
+    },
+    {
+      "path": "Grove/Controllers/IconViewController.swift",
+      "startLine": 270,
+      "endLine": 312,
+      "symbol": "IconViewController collection drop handling",
+      "quote": null
+    },
+    {
+      "path": "Grove/Controllers/BrowserWindowController.swift",
+      "startLine": 484,
+      "endLine": 502,
+      "symbol": "BrowserWindowController file drop handling",
+      "quote": null
+    }
+  ],
+  "reasoning": "The code treats draggingSourceOperationMask.contains(.move) as the user's chosen operation in both validation and accept. That mask describes operations the source permits, not necessarily the negotiated copy-vs-move intent. A drag source that advertises both copy and move will be moved even when the user expects a copy.",
+  "reproduction": "Drag files from a source that permits both copy and move and request a copy operation, such as with the standard copy modifier. These handlers still return and execute move because .move is present in the allowed mask.",
+  "recommendation": "Choose and persist the actual negotiated operation for the drag session. Default to copy unless move is explicitly selected, and pass that selected operation into the transfer call instead of recomputing from the source capability mask in acceptDrop.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests simulate AppKit drag masks or modifier-driven copy/move negotiation across these drop targets.",
+  "suggestedRegressionTest": "Add drag/drop tests or fakes where the source mask is [.copy, .move] but the requested operation is copy, and assert the controllers call copy transfer paths.",
+  "minimumFixScope": "Fix drop validation and accept logic in BrowserWindowController, FileListViewController, and IconViewController.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260603T153237-8f4386",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence paths still exist, but the current handlers no longer turn any source containing .move into a move. FileListViewController lines 1016-1045, IconViewController lines 281-329, and BrowserWindowController lines 484-501 now all route through FileDropOperationResolver.preferredOperation(from:). That resolver, in Grove/Controllers/FileViewControllerProtocol.swift lines 42-55, returns .copy before .move, so a mixed [.copy, .move] source is copied, not moved. GroveTests/BrowserCapabilityTests.swift lines 30-32 adds a direct regression assertion for this mixed-mask behavior. I also searched all current draggingSourceOperationMask usages and did not find another drop handler still preferring move for mixed copy/move masks. Test execution could not be completed in this read-only sandbox: even xcodebuild -list failed while trying to create Xcode/cache/result files under /tmp and DerivedData. Based on current code plus the present regression test source, the reported data-loss issue is fixed in the current repository state.",
+      "commands": [
+        "rg -n \"draggingSourceOperationMask|validateDrop|acceptDrop|performDragOperation|dropOperation|FileOperationService|FileTransfer|move|copy\" Grove/Controllers/FileListViewController.swift Grove/Controllers/IconViewController.swift Grove/Controllers/BrowserWindowController.swift",
+        "rg -n \"validateDrop|acceptDrop|draggingSourceOperationMask|NSDragging|copy|move\" .",
+        "git status --short",
+        "nl -ba Grove/Controllers/FileViewControllerProtocol.swift | sed -n '1,80p'",
+        "nl -ba Grove/Controllers/FileListViewController.swift | sed -n '1008,1058p'",
+        "nl -ba Grove/Controllers/IconViewController.swift | sed -n '272,334p'",
+        "nl -ba Grove/Controllers/BrowserWindowController.swift | sed -n '476,532p'",
+        "nl -ba GroveTests/BrowserCapabilityTests.swift | sed -n '1,52p'",
+        "ls",
+        "find . -maxdepth 2 -type f \\( -name 'Package.swift' -o -name '*.xcodeproj' -o -name '*.xcworkspace' -o -name 'project.pbxproj' \\) -print",
+        "xcodebuild -list -project Grove.xcodeproj"
+      ],
+      "createdAt": "2026-06-03T15:53:53.709Z"
+    }
+  ],
+  "signature": "sig_feat-ui-flow-ccbda03ee7_bfe17daacf",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260603T151304-a570ce",
+  "createdAt": "2026-06-03T15:20:45.575Z",
+  "updatedAt": "2026-06-03T15:53:53.709Z"
+}

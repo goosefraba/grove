@@ -48,15 +48,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     @objc func newTab(_ sender: Any?) {
-        guard let currentWindow = NSApp.keyWindow else {
+        guard let currentWC = activeBrowserWindowController(),
+              let currentWindow = currentWC.window else {
             newWindow(sender)
             return
         }
 
-        let currentWC = currentWindow.windowController as? BrowserWindowController
-        let initialLocation = currentWC?.currentLocation ?? .local(FileManager.default.homeDirectoryForCurrentUser)
-
-        let wc = BrowserWindowController(initialLocation: initialLocation)
+        let wc = BrowserWindowController(initialLocation: currentWC.currentLocation)
         windowControllers.append(wc)
         guard let newWindow = wc.window else { return }
         currentWindow.addTabbedWindow(newWindow, ordered: .above)
@@ -74,15 +72,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @objc private func windowDidClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
-        saveWindowStates()
         windowControllers.removeAll { $0.window === window }
+        saveWindowStates()
     }
 
     // MARK: - Window State Save/Restore
 
     private func saveWindowStates() {
+        windowControllers.removeAll { $0.window == nil }
         let states = windowControllers.map { $0.saveState() }
         UserDefaults.standard.set(states, forKey: BrowserWindowController.windowStatesKey)
+    }
+
+    private func activeBrowserWindowController() -> BrowserWindowController? {
+        if let keyController = NSApp.keyWindow?.windowController as? BrowserWindowController {
+            return keyController
+        }
+        return windowControllers.reversed().first { $0.window?.isVisible == true }
     }
 
     private func restoreWindowStates() -> Bool {
