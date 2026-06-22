@@ -76,6 +76,73 @@ final class StorageModelTests: XCTestCase {
         XCTAssertEqual(history.goForwardLocation(), s3)
     }
 
+    func testMountedVolumeDescriptorUsesMetadataForIdentityAndActions() {
+        let volume = MountedVolume(
+            url: URL(fileURLWithPath: "/Volumes/Backup"),
+            displayName: "Backup",
+            volumeName: "Backup",
+            uuid: "backup-volume",
+            isEjectable: true,
+            isRemovable: true,
+            isInternal: false,
+            isLocal: true,
+            isReadOnly: true,
+            totalCapacity: 1_000,
+            availableCapacity: 400
+        )
+
+        XCTAssertEqual(volume.stableIdentifier, "backup-volume")
+        XCTAssertEqual(volume.systemImage, "externaldrive")
+        XCTAssertTrue(volume.supportsEject)
+        XCTAssertTrue(volume.toolTip.contains("Read Only"))
+        XCTAssertTrue(volume.toolTip.contains("Ejectable"))
+        XCTAssertTrue(volume.contains(URL(fileURLWithPath: "/Volumes/Backup/Photos")))
+        XCTAssertFalse(volume.contains(URL(fileURLWithPath: "/Volumes/Backup Clone")))
+    }
+
+    func testInternalMountedVolumeDoesNotAdvertiseEject() {
+        let volume = MountedVolume(
+            url: URL(fileURLWithPath: "/"),
+            displayName: "Macintosh HD",
+            uuid: "system-volume",
+            isEjectable: false,
+            isRemovable: false,
+            isInternal: true
+        )
+
+        XCTAssertEqual(volume.systemImage, "internaldrive")
+        XCTAssertFalse(volume.supportsEject)
+        XCTAssertTrue(volume.contains(URL(fileURLWithPath: "/Users/test/Documents")))
+    }
+
+    func testSidebarVolumeItemsDeduplicateSortAndPreserveVolumeMetadata() {
+        let backup = MountedVolume(
+            url: URL(fileURLWithPath: "/Volumes/Backup"),
+            displayName: "Backup",
+            uuid: "same-device",
+            isEjectable: true
+        )
+        let duplicateBackup = MountedVolume(
+            url: URL(fileURLWithPath: "/Volumes/Backup Alias"),
+            canonicalURL: URL(fileURLWithPath: "/Volumes/Backup"),
+            displayName: "Backup Alias",
+            uuid: "same-device",
+            isEjectable: true
+        )
+        let archive = MountedVolume(
+            url: URL(fileURLWithPath: "/Volumes/Archive"),
+            displayName: "Archive",
+            uuid: "archive-device"
+        )
+
+        let items = SidebarItem.volumeItems(from: [backup, duplicateBackup, archive])
+
+        XCTAssertEqual(items.map(\.title), ["Archive", "Backup"])
+        XCTAssertEqual(items.map(\.section), [.locations, .locations])
+        XCTAssertEqual(items[1].mountedVolume, backup)
+        XCTAssertTrue(items[1].representsProvider(of: .local(URL(fileURLWithPath: "/Volumes/Backup/Project"))))
+    }
+
     func testS3CapabilitiesExcludeLocalOnlyCommands() {
         let capabilities = StorageLocation.s3(S3Location()).capabilities
 

@@ -4,6 +4,149 @@ extension Notification.Name {
     static let addToSidebarFavorites = Notification.Name("com.grove.addToSidebarFavorites")
 }
 
+struct MountedVolume: Hashable {
+    static let resourceKeys: Set<URLResourceKey> = [
+        .localizedNameKey,
+        .volumeNameKey,
+        .volumeIsEjectableKey,
+        .volumeIsRemovableKey,
+        .volumeIsInternalKey,
+        .volumeIsLocalKey,
+        .volumeIsReadOnlyKey,
+        .volumeUUIDStringKey,
+        .volumeTotalCapacityKey,
+        .volumeAvailableCapacityKey,
+    ]
+
+    let url: URL
+    let canonicalURL: URL
+    let displayName: String
+    let volumeName: String?
+    let uuid: String?
+    let isEjectable: Bool
+    let isRemovable: Bool
+    let isInternal: Bool
+    let isLocal: Bool
+    let isReadOnly: Bool
+    let totalCapacity: Int?
+    let availableCapacity: Int?
+
+    init?(
+        url: URL,
+        fileManager: FileManager = .default
+    ) {
+        let standardizedURL = url.standardizedFileURL
+        guard let values = try? standardizedURL.resourceValues(forKeys: Self.resourceKeys) else {
+            return nil
+        }
+
+        let displayName = values.localizedName ??
+            values.volumeName ??
+            fileManager.displayName(atPath: standardizedURL.path)
+        guard !displayName.isEmpty else { return nil }
+
+        self.init(
+            url: standardizedURL,
+            canonicalURL: standardizedURL.resolvingSymlinksInPath().standardizedFileURL,
+            displayName: displayName,
+            volumeName: values.volumeName,
+            uuid: values.volumeUUIDString,
+            isEjectable: values.volumeIsEjectable ?? false,
+            isRemovable: values.volumeIsRemovable ?? false,
+            isInternal: values.volumeIsInternal ?? false,
+            isLocal: values.volumeIsLocal ?? true,
+            isReadOnly: values.volumeIsReadOnly ?? false,
+            totalCapacity: values.volumeTotalCapacity,
+            availableCapacity: values.volumeAvailableCapacity
+        )
+    }
+
+    init(
+        url: URL,
+        canonicalURL: URL? = nil,
+        displayName: String,
+        volumeName: String? = nil,
+        uuid: String? = nil,
+        isEjectable: Bool = false,
+        isRemovable: Bool = false,
+        isInternal: Bool = false,
+        isLocal: Bool = true,
+        isReadOnly: Bool = false,
+        totalCapacity: Int? = nil,
+        availableCapacity: Int? = nil
+    ) {
+        self.url = url.standardizedFileURL
+        self.canonicalURL = (canonicalURL ?? url).resolvingSymlinksInPath().standardizedFileURL
+        self.displayName = displayName
+        self.volumeName = volumeName
+        self.uuid = uuid
+        self.isEjectable = isEjectable
+        self.isRemovable = isRemovable
+        self.isInternal = isInternal
+        self.isLocal = isLocal
+        self.isReadOnly = isReadOnly
+        self.totalCapacity = totalCapacity
+        self.availableCapacity = availableCapacity
+    }
+
+    var stableIdentifier: String {
+        uuid ?? canonicalURL.path
+    }
+
+    var supportsEject: Bool {
+        isEjectable || isRemovable
+    }
+
+    var systemImage: String {
+        if !isLocal {
+            return "network"
+        }
+        if isInternal {
+            return "internaldrive"
+        }
+        return "externaldrive"
+    }
+
+    var toolTip: String {
+        var details: [String] = [canonicalURL.path]
+        if isReadOnly {
+            details.append("Read Only")
+        }
+        if supportsEject {
+            details.append("Ejectable")
+        }
+        return details.joined(separator: "\n")
+    }
+
+    func contains(_ candidate: URL) -> Bool {
+        let candidatePath = candidate.resolvingSymlinksInPath().standardizedFileURL.path
+        let rootPath = canonicalURL.path
+
+        if rootPath == "/" {
+            return candidatePath.hasPrefix("/")
+        }
+        return candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/")
+    }
+
+    static func mountedVolumes(fileManager: FileManager = .default) -> [MountedVolume] {
+        let volumeURLs = fileManager.mountedVolumeURLs(
+            includingResourceValuesForKeys: Array(resourceKeys),
+            options: [.skipHiddenVolumes]
+        ) ?? []
+
+        return uniqueSorted(volumeURLs.compactMap { MountedVolume(url: $0, fileManager: fileManager) })
+    }
+
+    static func uniqueSorted(_ volumes: [MountedVolume]) -> [MountedVolume] {
+        var seen = Set<String>()
+        return volumes
+            .filter { seen.insert($0.stableIdentifier).inserted }
+            .sorted { lhs, rhs in
+                lhs.displayName.localizedStandardCompare(rhs.displayName) == .orderedAscending
+            }
+    }
+}
+
 enum SidebarSection: String, CaseIterable {
     case favorites = "Favorites"
     case locations = "Locations"
@@ -16,29 +159,58 @@ struct SidebarItem: Hashable {
     let systemImage: String
     let section: SidebarSection
     let isBuiltIn: Bool
+    let mountedVolume: MountedVolume?
 
     var url: URL {
         location.localURL ?? FileManager.default.homeDirectoryForCurrentUser
     }
 
-    init(title: String, url: URL, systemImage: String, section: SidebarSection, isBuiltIn: Bool = true) {
+    init(
+        title: String,
+        url: URL,
+        systemImage: String,
+        section: SidebarSection,
+        isBuiltIn: Bool = true,
+        mountedVolume: MountedVolume? = nil
+    ) {
         self.title = title
         self.location = .local(url.standardizedFileURL)
         self.systemImage = systemImage
         self.section = section
         self.isBuiltIn = isBuiltIn
+        self.mountedVolume = mountedVolume
     }
 
-    init(title: String, location: StorageLocation, systemImage: String, section: SidebarSection, isBuiltIn: Bool = true) {
+    init(
+        title: String,
+        location: StorageLocation,
+        systemImage: String,
+        section: SidebarSection,
+        isBuiltIn: Bool = true,
+        mountedVolume: MountedVolume? = nil
+    ) {
         self.title = title
         self.location = location
         self.systemImage = systemImage
         self.section = section
         self.isBuiltIn = isBuiltIn
+        self.mountedVolume = mountedVolume
+    }
+
+    var toolTip: String {
+        if let mountedVolume {
+            return mountedVolume.toolTip
+        }
+        if case .local(let url) = location {
+            return url.path
+        }
+        return location.displayName
     }
 
     func representsProvider(of otherLocation: StorageLocation) -> Bool {
         switch (location, otherLocation) {
+        case (.local, .local(let otherURL)):
+            return mountedVolume?.contains(otherURL) ?? false
         case (.s3, .s3):
             return true
         default:
@@ -126,31 +298,17 @@ struct SidebarItem: Hashable {
     }
 
     static func volumes() -> [SidebarItem] {
-        let volumesURL = URL(fileURLWithPath: "/Volumes")
-        guard let contents = try? FileManager.default.contentsOfDirectory(
-            at: volumesURL,
-            includingPropertiesForKeys: [.isHiddenKey, .volumeNameKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return []
-        }
+        volumeItems(from: MountedVolume.mountedVolumes())
+    }
 
-        var seenCanonicalPaths = Set<String>()
-
-        return contents.compactMap { url in
-            let canonicalURL = url.resolvingSymlinksInPath().standardizedFileURL
-            guard seenCanonicalPaths.insert(canonicalURL.path).inserted else { return nil }
-
-            let name =
-                (try? url.resourceValues(forKeys: [.volumeNameKey]))?.volumeName ??
-                (try? canonicalURL.resourceValues(forKeys: [.volumeNameKey]))?.volumeName ??
-                url.lastPathComponent
-
-            return SidebarItem(
-                title: name,
-                url: canonicalURL,
-                systemImage: "externaldrive",
-                section: .locations
+    static func volumeItems(from volumes: [MountedVolume]) -> [SidebarItem] {
+        MountedVolume.uniqueSorted(volumes).map { volume in
+            SidebarItem(
+                title: volume.displayName,
+                url: volume.canonicalURL,
+                systemImage: volume.systemImage,
+                section: .locations,
+                mountedVolume: volume
             )
         }
     }

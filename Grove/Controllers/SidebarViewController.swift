@@ -23,11 +23,20 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private var items: [SidebarSection: [SidebarItem]] = [:]
 
     private var suppressSelectionCallback = false
+    private var contextMenuItem: SidebarItem?
+    private var contextMenuRow: Int?
+    private var volumeRefreshWorkItem: DispatchWorkItem?
     private static let sidebarItemPasteboardType = NSPasteboard.PasteboardType("com.grove.sidebaritem")
 
     override func loadView() {
         view = NSView()
         view.setFrameSize(NSSize(width: 200, height: 400))
+    }
+
+    deinit {
+        volumeRefreshWorkItem?.cancel()
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        NotificationCenter.default.removeObserver(self)
     }
 
     override func viewDidLoad() {
@@ -40,7 +49,11 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         ws.addObserver(self, selector: #selector(volumesChanged(_:)),
                        name: NSWorkspace.didMountNotification, object: nil)
         ws.addObserver(self, selector: #selector(volumesChanged(_:)),
+                       name: NSWorkspace.willUnmountNotification, object: nil)
+        ws.addObserver(self, selector: #selector(volumesChanged(_:)),
                        name: NSWorkspace.didUnmountNotification, object: nil)
+        ws.addObserver(self, selector: #selector(volumesChanged(_:)),
+                       name: NSWorkspace.didRenameVolumeNotification, object: nil)
 
         NotificationCenter.default.addObserver(self, selector: #selector(handleAddToFavorites(_:)),
                                                name: .addToSidebarFavorites, object: nil)
@@ -54,8 +67,44 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     @objc private func volumesChanged(_ notification: Notification) {
+        scheduleVolumeRefresh()
+    }
+
+    private func scheduleVolumeRefresh() {
+        volumeRefreshWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.reloadLocationsPreservingSelection()
+        }
+        volumeRefreshWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: workItem)
+    }
+
+    private func reloadLocationsPreservingSelection() {
+        let selectedLocation = selectedSidebarItem()?.location
         items[.locations] = SidebarItem.volumes()
         outlineView.reloadData()
+        expandAllSections()
+
+        if let selectedLocation {
+            selectItem(for: selectedLocation)
+        }
+    }
+
+    private func selectedSidebarItem() -> SidebarItem? {
+        let row = outlineView.selectedRow
+        guard row >= 0 else { return nil }
+        return outlineView.item(atRow: row) as? SidebarItem
+    }
+
+    private func sidebarItem(from sender: Any?) -> SidebarItem? {
+        if let menuItem = sender as? NSMenuItem,
+           let sidebarItem = menuItem.representedObject as? SidebarItem {
+            return sidebarItem
+        }
+        return contextMenuItem
+    }
+
+    private func expandAllSections() {
         for section in sections {
             outlineView.expandItem(section)
         }
@@ -101,9 +150,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
         outlineView.reloadData()
 
-        for section in sections {
-            outlineView.expandItem(section)
-        }
+        expandAllSections()
     }
 
     // MARK: - NSOutlineViewDataSource
@@ -224,9 +271,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         SidebarItem.saveCustomFavorites(customFavs)
         reloadItems()
         outlineView.reloadData()
-        for section in sections {
-            outlineView.expandItem(section)
-        }
+        expandAllSections()
         return true
     }
 
@@ -277,9 +322,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         SidebarItem.saveCustomFavorites(customFavs)
         reloadItems()
         outlineView.reloadData()
-        for section in sections {
-            outlineView.expandItem(section)
-        }
+        expandAllSections()
         return true
     }
 
@@ -352,9 +395,13 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
             cell.textField?.stringValue = sidebarItem.title
             cell.textField?.font = .systemFont(ofSize: GroveUI.sidebarFontSize)
-            cell.imageView?.image = NSImage(systemSymbolName: sidebarItem.systemImage, accessibilityDescription: sidebarItem.title)
+            cell.imageView?.image = NSImage(
+                systemSymbolName: sidebarItem.systemImage,
+                accessibilityDescription: sidebarItem.title
+            ) ?? NSImage(systemSymbolName: "externaldrive", accessibilityDescription: sidebarItem.title)
             cell.imageView?.contentTintColor = .controlAccentColor
-            cell.setAccessibilityLabel("\(sidebarItem.title) - \(sidebarItem.location.displayName)")
+            cell.toolTip = sidebarItem.toolTip
+            cell.setAccessibilityLabel("\(sidebarItem.title) - \(sidebarItem.toolTip)")
             cell.setAccessibilityIdentifier("sidebar_\(sidebarItem.title)")
             return cell
         }
@@ -414,9 +461,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         SidebarItem.saveCustomFavorites(customFavs)
         reloadItems()
         outlineView.reloadData()
-        for section in sections {
-            outlineView.expandItem(section)
-        }
+        expandAllSections()
     }
 
     @objc private func removeFromSidebar(_ sender: Any) {
@@ -431,8 +476,49 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         SidebarItem.saveCustomFavorites(customFavs)
         reloadItems()
         outlineView.reloadData()
-        for section in sections {
-            outlineView.expandItem(section)
+        expandAllSections()
+    }
+
+    @objc private func browseSidebarItem(_ sender: Any) {
+        guard let sidebarItem = sidebarItem(from: sender) else { return }
+        suppressSelectionCallback = true
+        let row = contextMenuRow ?? outlineView.row(forItem: sidebarItem)
+        if row >= 0 {
+            outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        }
+        suppressSelectionCallback = false
+        delegate?.sidebarDidSelect(location: sidebarItem.location)
+    }
+
+    @objc private func revealSidebarItemInFinder(_ sender: Any) {
+        guard let sidebarItem = sidebarItem(from: sender),
+              let url = sidebarItem.location.localURL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    @objc private func ejectMountedVolume(_ sender: Any) {
+        guard let sidebarItem = sidebarItem(from: sender),
+              let mountedVolume = sidebarItem.mountedVolume,
+              mountedVolume.supportsEject else { return }
+
+        do {
+            try NSWorkspace.shared.unmountAndEjectDevice(at: mountedVolume.url)
+            scheduleVolumeRefresh()
+        } catch {
+            showVolumeEjectError(error, volumeName: mountedVolume.displayName)
+        }
+    }
+
+    private func showVolumeEjectError(_ error: Error, volumeName: String) {
+        let alert = NSAlert()
+        alert.messageText = "Could not eject \(volumeName)"
+        alert.informativeText = (error as NSError).localizedDescription
+        alert.alertStyle = .warning
+
+        if let window = view.window {
+            alert.beginSheetModal(for: window, completionHandler: nil)
+        } else {
+            alert.runModal()
         }
     }
 }
@@ -442,12 +528,53 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 extension SidebarViewController: NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
+        contextMenuItem = nil
+        contextMenuRow = nil
 
         let clickedRow = outlineView.clickedRow
         guard clickedRow >= 0,
-              let sidebarItem = outlineView.item(atRow: clickedRow) as? SidebarItem,
-              sidebarItem.section == .favorites,
-              !sidebarItem.isBuiltIn else { return }
+              let sidebarItem = outlineView.item(atRow: clickedRow) as? SidebarItem else { return }
+        contextMenuItem = sidebarItem
+        contextMenuRow = clickedRow
+
+        let browseItem = NSMenuItem(
+            title: "Browse",
+            action: #selector(browseSidebarItem(_:)),
+            keyEquivalent: ""
+        )
+        browseItem.target = self
+        browseItem.representedObject = sidebarItem
+        menu.addItem(browseItem)
+
+        if sidebarItem.location.localURL != nil {
+            let revealItem = NSMenuItem(
+                title: "Reveal in Finder",
+                action: #selector(revealSidebarItemInFinder(_:)),
+                keyEquivalent: ""
+            )
+            revealItem.target = self
+            revealItem.representedObject = sidebarItem
+            menu.addItem(revealItem)
+        }
+
+        if let mountedVolume = sidebarItem.mountedVolume {
+            if mountedVolume.supportsEject {
+                menu.addItem(.separator())
+                let ejectItem = NSMenuItem(
+                    title: "Eject \(mountedVolume.displayName)",
+                    action: #selector(ejectMountedVolume(_:)),
+                    keyEquivalent: ""
+                )
+                ejectItem.target = self
+                ejectItem.representedObject = sidebarItem
+                menu.addItem(ejectItem)
+            }
+            return
+        }
+
+        guard sidebarItem.section == .favorites, !sidebarItem.isBuiltIn else { return }
+
+        menu.addItem(.separator())
 
         let removeItem = NSMenuItem(
             title: "Remove from Sidebar",
