@@ -106,10 +106,7 @@ final class GalleryViewController: NSViewController, FileViewControllerProtocol,
     }
 
     private func setupStatusBar() {
-        statusBar.font = .systemFont(ofSize: GroveUI.statusFontSize)
-        statusBar.textColor = .secondaryLabelColor
-        statusBar.translatesAutoresizingMaskIntoConstraints = false
-        statusBar.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
+        GroveUI.configureFooterStatusLabel(statusBar)
         view.addSubview(statusBar)
 
         let separator = NSBox()
@@ -284,11 +281,12 @@ final class GalleryViewController: NSViewController, FileViewControllerProtocol,
     private func updateStatusBar() {
         let count = items.count
         let selectedCount = currentPreviewIndex >= 0 ? 1 : 0
-        let itemText = count == 1 ? "1 item" : "\(count) items"
-        let selectionText = selectedCount > 0 ? " (\(selectedCount) selected)" : ""
-        let diskSpace = FileOperationService.shared.availableDiskSpace(at: currentURL) ?? ""
-        let spaceText = diskSpace.isEmpty ? "" : "  —  \(diskSpace) available"
-        statusBar.stringValue = "\(itemText)\(selectionText)\(spaceText)"
+        let diskSpace = FileOperationService.shared.availableDiskSpace(at: currentURL)
+        statusBar.stringValue = LocalFooterStatusFormatter.string(
+            totalItemCount: count,
+            selectedItemCount: selectedCount,
+            availableDiskSpace: diskSpace
+        )
     }
 
     private func renameSelectedFile() {

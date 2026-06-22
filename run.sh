@@ -18,6 +18,7 @@ xcodebuild -project "$PROJECT_DIR/$APP_NAME.xcodeproj" \
   -scheme "$APP_NAME" \
   -configuration Debug \
   -derivedDataPath "$DERIVED_DATA_PATH" \
+  -skipPackagePluginValidation \
   build -quiet
 
 APP_PATH="$DERIVED_DATA_PATH/Build/Products/Debug/$APP_NAME.app"

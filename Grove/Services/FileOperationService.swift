@@ -677,11 +677,16 @@ final class FileOperationService {
         NSWorkspace.shared.open(url)
     }
 
-    func availableDiskSpace(at url: URL) -> String? {
-        guard let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
-              let capacity = values.volumeAvailableCapacityForImportantUsage else {
+    func availableDiskCapacity(at url: URL) -> Int64? {
+        guard let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityKey]),
+              let capacity = values.volumeAvailableCapacity else {
             return nil
         }
+        return Int64(capacity)
+    }
+
+    func availableDiskSpace(at url: URL) -> String? {
+        guard let capacity = availableDiskCapacity(at: url) else { return nil }
         return ByteCountFormatter.string(fromByteCount: capacity, countStyle: .file)
     }
 }

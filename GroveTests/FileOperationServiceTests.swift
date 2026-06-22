@@ -85,4 +85,41 @@ final class FileOperationServiceTests: XCTestCase {
         })
         XCTAssertEqual(try String(contentsOf: destinationFile), "original")
     }
+
+    func testAvailableDiskCapacityUsesActualFreeVolumeCapacity() throws {
+        let values = try tempRoot.resourceValues(forKeys: [
+            .volumeAvailableCapacityKey,
+            .volumeAvailableCapacityForImportantUsageKey,
+        ])
+        let expected = Int64(try XCTUnwrap(values.volumeAvailableCapacity))
+        let actual = try XCTUnwrap(FileOperationService.shared.availableDiskCapacity(at: tempRoot))
+        let tolerance: Int64 = 64 * 1024 * 1024
+
+        XCTAssertLessThanOrEqual(abs(actual - expected), tolerance)
+
+        if let important = values.volumeAvailableCapacityForImportantUsage,
+           abs(important - expected) > 1024 * 1024 * 1024 {
+            XCTAssertLessThan(abs(actual - expected), abs(actual - important))
+        }
+    }
+
+    func testLocalFooterStatusFormatterShowsSelectionOutOfTotalAndAvailableSpace() {
+        let status = LocalFooterStatusFormatter.string(
+            totalItemCount: 46,
+            selectedItemCount: 1,
+            availableDiskSpace: "121.1 GB"
+        )
+
+        XCTAssertEqual(status, "1 of 46 selected, 121.1 GB available")
+    }
+
+    func testLocalFooterStatusFormatterFallsBackToItemCountWithoutSelection() {
+        let status = LocalFooterStatusFormatter.string(
+            totalItemCount: 46,
+            selectedItemCount: 0,
+            availableDiskSpace: "121.1 GB"
+        )
+
+        XCTAssertEqual(status, "46 items, 121.1 GB available")
+    }
 }

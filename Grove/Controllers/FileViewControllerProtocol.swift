@@ -37,6 +37,33 @@ enum GroveUI {
     static let iconLabelFontSize: CGFloat = 10
     static let iconItemSize = NSSize(width: 84, height: 74)
     static let iconSize: CGFloat = 44
+
+    static func configureFooterStatusLabel(_ label: NSTextField) {
+        label.font = .systemFont(ofSize: statusFontSize)
+        label.textColor = .secondaryLabelColor
+        label.alignment = .center
+        label.lineBreakMode = .byTruncatingTail
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
+        label.setAccessibilityIdentifier("localStatusFooter")
+    }
+}
+
+enum LocalFooterStatusFormatter {
+    static func string(totalItemCount: Int, selectedItemCount: Int, availableDiskSpace: String?) -> String {
+        let summary: String
+        if selectedItemCount > 0 {
+            summary = "\(selectedItemCount) of \(totalItemCount) selected"
+        } else {
+            summary = totalItemCount == 1 ? "1 item" : "\(totalItemCount) items"
+        }
+
+        guard let availableDiskSpace, !availableDiskSpace.isEmpty else {
+            return summary
+        }
+
+        return "\(summary), \(availableDiskSpace) available"
+    }
 }
 
 enum FileDropOperationResolver {
