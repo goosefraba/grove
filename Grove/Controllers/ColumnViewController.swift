@@ -198,12 +198,17 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
         let items = columnItems[currentColumnIndex] ?? []
         let count = items.count
         let selectedCount = selectedItems.count
-        let diskSpace = FileOperationService.shared.availableDiskSpace(at: currentURL)
+        let diskSpace = LocalFooterDiskSpaceCache.shared.diskSpace(at: currentURL)
         statusBar.stringValue = LocalFooterStatusFormatter.string(
             totalItemCount: count,
             selectedItemCount: selectedCount,
             availableDiskSpace: diskSpace
         )
+        LocalFooterDiskSpaceCache.shared.refreshIfNeeded(at: currentURL) { [weak self] refreshedURL in
+            guard let self,
+                  self.currentURL.standardizedFileURL == refreshedURL.standardizedFileURL else { return }
+            self.updateStatusBar()
+        }
     }
 
     private var currentColumnIndex: Int {

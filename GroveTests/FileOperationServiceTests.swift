@@ -122,4 +122,34 @@ final class FileOperationServiceTests: XCTestCase {
 
         XCTAssertEqual(status, "46 items, 121.1 GB available")
     }
+
+    func testLocalFooterDiskSpaceCacheCoalescesRefreshesAndServesCachedValue() {
+        let refreshed = expectation(description: "disk space refreshed once")
+        refreshed.expectedFulfillmentCount = 1
+
+        let cache = LocalFooterDiskSpaceCache(
+            freshnessInterval: 60,
+            refreshDelay: 0,
+            queueLabel: "com.grove.tests.local-footer-disk-space",
+            diskSpaceProvider: { _ in
+                "120 GB"
+            }
+        )
+
+        XCTAssertNil(cache.diskSpace(at: tempRoot))
+
+        cache.refreshIfNeeded(at: tempRoot) { _ in
+            refreshed.fulfill()
+        }
+        cache.refreshIfNeeded(at: tempRoot) { _ in
+            XCTFail("Concurrent refresh should be coalesced")
+        }
+
+        wait(for: [refreshed], timeout: 1)
+        XCTAssertEqual(cache.diskSpace(at: tempRoot), "120 GB")
+
+        cache.refreshIfNeeded(at: tempRoot) { _ in
+            XCTFail("Fresh cached disk space should not refresh")
+        }
+    }
 }

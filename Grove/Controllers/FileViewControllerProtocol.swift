@@ -66,6 +66,75 @@ enum LocalFooterStatusFormatter {
     }
 }
 
+final class LocalFooterDiskSpaceCache {
+    static let shared = LocalFooterDiskSpaceCache()
+
+    private struct Entry {
+        let value: String?
+        let refreshedAt: Date
+    }
+
+    private let freshnessInterval: TimeInterval
+    private let refreshDelay: TimeInterval
+    private let queue: DispatchQueue
+    private let diskSpaceProvider: (URL) -> String?
+    private var entries: [String: Entry] = [:]
+    private var refreshesInFlight: Set<String> = []
+
+    init(
+        freshnessInterval: TimeInterval = 10,
+        refreshDelay: TimeInterval = 0.5,
+        queueLabel: String = "com.grove.local-footer-disk-space",
+        diskSpaceProvider: @escaping (URL) -> String? = { FileOperationService.shared.availableDiskSpace(at: $0) }
+    ) {
+        self.freshnessInterval = freshnessInterval
+        self.refreshDelay = refreshDelay
+        self.queue = DispatchQueue(label: queueLabel)
+        self.diskSpaceProvider = diskSpaceProvider
+    }
+
+    func diskSpace(at url: URL) -> String? {
+        let key = cacheKey(for: url)
+        return queue.sync {
+            entries[key]?.value
+        }
+    }
+
+    func refreshIfNeeded(at url: URL, completion: @escaping (URL) -> Void) {
+        let key = cacheKey(for: url)
+        let standardizedURL = url.standardizedFileURL
+        let now = Date()
+        let shouldRefresh = queue.sync { () -> Bool in
+            if let entry = entries[key],
+               now.timeIntervalSince(entry.refreshedAt) < freshnessInterval {
+                return false
+            }
+            guard !refreshesInFlight.contains(key) else { return false }
+            refreshesInFlight.insert(key)
+            return true
+        }
+
+        guard shouldRefresh else { return }
+
+        queue.asyncAfter(deadline: .now() + refreshDelay) { [weak self] in
+            guard let self else { return }
+            let value = diskSpaceProvider(standardizedURL)
+            let refreshedAt = Date()
+            queue.async {
+                self.entries[key] = Entry(value: value, refreshedAt: refreshedAt)
+                self.refreshesInFlight.remove(key)
+                DispatchQueue.main.async {
+                    completion(standardizedURL)
+                }
+            }
+        }
+    }
+
+    private func cacheKey(for url: URL) -> String {
+        url.standardizedFileURL.path
+    }
+}
+
 enum FileDropOperationResolver {
     static func preferredOperation(from sourceMask: NSDragOperation) -> NSDragOperation {
         if sourceMask.contains(.copy) {

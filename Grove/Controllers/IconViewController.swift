@@ -212,12 +212,17 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
     private func updateStatusBar() {
         let count = items.count
         let selectedCount = collectionView.selectionIndexPaths.count
-        let diskSpace = FileOperationService.shared.availableDiskSpace(at: currentURL)
+        let diskSpace = LocalFooterDiskSpaceCache.shared.diskSpace(at: currentURL)
         statusBar.stringValue = LocalFooterStatusFormatter.string(
             totalItemCount: count,
             selectedItemCount: selectedCount,
             availableDiskSpace: diskSpace
         )
+        LocalFooterDiskSpaceCache.shared.refreshIfNeeded(at: currentURL) { [weak self] refreshedURL in
+            guard let self,
+                  self.currentURL.standardizedFileURL == refreshedURL.standardizedFileURL else { return }
+            self.updateStatusBar()
+        }
     }
 
     // MARK: - NSCollectionViewDataSource
