@@ -43,6 +43,19 @@ final class BrowserCapabilityTests: XCTestCase {
         XCTAssertFalse(script.contains("cd \\\"/tmp"))
     }
 
+    func testTerminalCopyPathShellQuotesFileAndFolderPaths() {
+        let folderURL = URL(fileURLWithPath: "/tmp/Grove Folder/Sub Folder", isDirectory: true)
+        let fileURL = URL(fileURLWithPath: "/tmp/Grove Folder/file 'one' $(touch bad).txt")
+
+        XCTAssertEqual(FileListViewController.terminalCopyPath(for: folderURL), "'/tmp/Grove Folder/Sub Folder'")
+
+        let filePath = FileListViewController.terminalCopyPath(for: fileURL)
+        XCTAssertTrue(filePath.hasPrefix("'/tmp/Grove Folder/file "))
+        XCTAssertTrue(filePath.contains("'\\''one'\\''"))
+        XCTAssertTrue(filePath.contains("$(touch bad)"))
+        XCTAssertTrue(filePath.hasSuffix(".txt'"))
+    }
+
     func testS3RegionSuggestionsPreferProfileHintAndResolvedRegionUsesOverride() {
         let suggestions = S3BrowserViewController.regionSuggestions(
             preferredRegion: "eu-central-1",
