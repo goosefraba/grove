@@ -496,6 +496,39 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
+    @objc private func copySidebarUnixPath(_ sender: Any) {
+        copySidebarPath(format: .unix, sender: sender)
+    }
+
+    @objc private func copySidebarHFSPath(_ sender: Any) {
+        copySidebarPath(format: .hfs, sender: sender)
+    }
+
+    @objc private func copySidebarWindowsPath(_ sender: Any) {
+        copySidebarPath(format: .windows, sender: sender)
+    }
+
+    @objc private func copySidebarTerminalPath(_ sender: Any) {
+        copySidebarPath(format: .terminal, sender: sender)
+    }
+
+    @objc private func copySidebarURLPath(_ sender: Any) {
+        copySidebarPath(format: .url, sender: sender)
+    }
+
+    @objc private func copySidebarName(_ sender: Any) {
+        copySidebarPath(format: .name, sender: sender)
+    }
+
+    private func copySidebarPath(format: PathCopyFormat, sender: Any) {
+        guard let sidebarItem = sidebarItem(from: sender),
+              let url = sidebarItem.location.localURL else { return }
+
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(PathCopyFormatter.string(for: url, format: format), forType: .string)
+    }
+
     @objc private func ejectMountedVolume(_ sender: Any) {
         guard let sidebarItem = sidebarItem(from: sender),
               let mountedVolume = sidebarItem.mountedVolume,
@@ -555,6 +588,10 @@ extension SidebarViewController: NSMenuDelegate {
             revealItem.target = self
             revealItem.representedObject = sidebarItem
             menu.addItem(revealItem)
+
+            let copyPathItem = NSMenuItem(title: "Copy Path", action: nil, keyEquivalent: "")
+            copyPathItem.submenu = buildCopyPathSubmenu(for: sidebarItem)
+            menu.addItem(copyPathItem)
         }
 
         if let mountedVolume = sidebarItem.mountedVolume {
@@ -583,5 +620,27 @@ extension SidebarViewController: NSMenuDelegate {
         )
         removeItem.target = self
         menu.addItem(removeItem)
+    }
+
+    private func buildCopyPathSubmenu(for sidebarItem: SidebarItem) -> NSMenu {
+        let submenu = NSMenu()
+        addCopyPathMenuItem(to: submenu, format: .unix, action: #selector(copySidebarUnixPath(_:)), sidebarItem: sidebarItem)
+        addCopyPathMenuItem(to: submenu, format: .hfs, action: #selector(copySidebarHFSPath(_:)), sidebarItem: sidebarItem)
+        addCopyPathMenuItem(to: submenu, format: .windows, action: #selector(copySidebarWindowsPath(_:)), sidebarItem: sidebarItem)
+        addCopyPathMenuItem(to: submenu, format: .terminal, action: #selector(copySidebarTerminalPath(_:)), sidebarItem: sidebarItem)
+        addCopyPathMenuItem(to: submenu, format: .url, action: #selector(copySidebarURLPath(_:)), sidebarItem: sidebarItem)
+        addCopyPathMenuItem(to: submenu, format: .name, action: #selector(copySidebarName(_:)), sidebarItem: sidebarItem)
+        return submenu
+    }
+
+    private func addCopyPathMenuItem(
+        to menu: NSMenu,
+        format: PathCopyFormat,
+        action: Selector,
+        sidebarItem: SidebarItem
+    ) {
+        let item = menu.addItem(withTitle: format.menuTitle, action: action, keyEquivalent: "")
+        item.target = self
+        item.representedObject = sidebarItem
     }
 }

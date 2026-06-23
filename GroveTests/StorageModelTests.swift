@@ -143,6 +143,16 @@ final class StorageModelTests: XCTestCase {
         XCTAssertTrue(items[1].representsProvider(of: .local(URL(fileURLWithPath: "/Volumes/Backup/Project"))))
     }
 
+    func testPathCopyFormatterFormatsLocalSidebarFolderPaths() {
+        let url = URL(fileURLWithPath: "/tmp/Grove Sidebar/Folder With 'Quote'", isDirectory: true)
+
+        XCTAssertEqual(PathCopyFormatter.string(for: url, format: .unix), "/tmp/Grove Sidebar/Folder With 'Quote'")
+        XCTAssertEqual(PathCopyFormatter.string(for: url, format: .terminal), "'/tmp/Grove Sidebar/Folder With '\\''Quote'\\'''")
+        XCTAssertEqual(PathCopyFormatter.string(for: url, format: .windows), "\\tmp\\Grove Sidebar\\Folder With 'Quote'")
+        XCTAssertEqual(PathCopyFormatter.string(for: url, format: .url), "file:///tmp/Grove%20Sidebar/Folder%20With%20'Quote'/")
+        XCTAssertEqual(PathCopyFormatter.string(for: url, format: .name), "Folder With 'Quote'")
+    }
+
     func testS3CapabilitiesExcludeLocalOnlyCommands() {
         let capabilities = StorageLocation.s3(S3Location()).capabilities
 

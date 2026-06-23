@@ -1326,12 +1326,12 @@ extension FileListViewController: NSMenuDelegate {
 
         // Copy Path submenu
         let copyPathSubmenu = NSMenu()
-        addCopyPathMenuItem(to: copyPathSubmenu, title: "UNIX", action: #selector(contextCopyUnixPath(_:)))
-        addCopyPathMenuItem(to: copyPathSubmenu, title: "HFS", action: #selector(contextCopyHFSPath(_:)))
-        addCopyPathMenuItem(to: copyPathSubmenu, title: "Windows", action: #selector(contextCopyWindowsPath(_:)))
-        addCopyPathMenuItem(to: copyPathSubmenu, title: "Terminal", action: #selector(contextCopyTerminalPath(_:)))
-        addCopyPathMenuItem(to: copyPathSubmenu, title: "URL", action: #selector(contextCopyURLPath(_:)))
-        addCopyPathMenuItem(to: copyPathSubmenu, title: "Name", action: #selector(contextCopyName(_:)))
+        addCopyPathMenuItem(to: copyPathSubmenu, format: .unix, action: #selector(contextCopyUnixPath(_:)))
+        addCopyPathMenuItem(to: copyPathSubmenu, format: .hfs, action: #selector(contextCopyHFSPath(_:)))
+        addCopyPathMenuItem(to: copyPathSubmenu, format: .windows, action: #selector(contextCopyWindowsPath(_:)))
+        addCopyPathMenuItem(to: copyPathSubmenu, format: .terminal, action: #selector(contextCopyTerminalPath(_:)))
+        addCopyPathMenuItem(to: copyPathSubmenu, format: .url, action: #selector(contextCopyURLPath(_:)))
+        addCopyPathMenuItem(to: copyPathSubmenu, format: .name, action: #selector(contextCopyName(_:)))
 
         let copyPathItem = NSMenuItem(title: "Copy Path", action: nil, keyEquivalent: "")
         copyPathItem.submenu = copyPathSubmenu
@@ -1518,17 +1518,8 @@ extension FileListViewController: NSMenuDelegate {
 
     // MARK: - Copy Path
 
-    private enum CopyPathFormat {
-        case unix
-        case hfs
-        case windows
-        case terminal
-        case url
-        case name
-    }
-
-    private func addCopyPathMenuItem(to menu: NSMenu, title: String, action: Selector) {
-        let item = menu.addItem(withTitle: title, action: action, keyEquivalent: "")
+    private func addCopyPathMenuItem(to menu: NSMenu, format: PathCopyFormat, action: Selector) {
+        let item = menu.addItem(withTitle: format.menuTitle, action: action, keyEquivalent: "")
         item.target = self
     }
 
@@ -1556,43 +1547,16 @@ extension FileListViewController: NSMenuDelegate {
         copySelectedPaths(format: .name)
     }
 
-    private func copySelectedPaths(format: CopyPathFormat) {
-        let paths = selectedItems.map { Self.copyPathString(for: $0.url, format: format) }
+    private func copySelectedPaths(format: PathCopyFormat) {
+        let paths = selectedItems.map { PathCopyFormatter.string(for: $0.url, format: format) }
         guard !paths.isEmpty else { return }
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(paths.joined(separator: "\n"), forType: .string)
     }
 
-    private static func copyPathString(for url: URL, format: CopyPathFormat) -> String {
-        switch format {
-        case .unix:
-            return url.path
-        case .hfs:
-            return hfsPath(for: url)
-        case .windows:
-            return url.path.replacingOccurrences(of: "/", with: "\\")
-        case .terminal:
-            return terminalCopyPath(for: url)
-        case .url:
-            return url.absoluteString
-        case .name:
-            return url.lastPathComponent
-        }
-    }
-
     static func terminalCopyPath(for url: URL) -> String {
-        shellQuotedPath(url.path)
-    }
-
-    private static func hfsPath(for url: URL) -> String {
-        var components = url.pathComponents.filter { $0 != "/" }
-        let volumeName = (try? url.resourceValues(forKeys: [.volumeNameKey]))?.volumeName
-        if let volumeName,
-           !volumeName.isEmpty {
-            components.insert(volumeName, at: 0)
-        }
-        return components.joined(separator: ":")
+        PathCopyFormatter.string(for: url, format: .terminal)
     }
 
     // MARK: - Calculate Size

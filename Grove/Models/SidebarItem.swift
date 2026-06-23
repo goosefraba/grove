@@ -4,6 +4,65 @@ extension Notification.Name {
     static let addToSidebarFavorites = Notification.Name("com.grove.addToSidebarFavorites")
 }
 
+enum PathCopyFormat: CaseIterable {
+    case unix
+    case hfs
+    case windows
+    case terminal
+    case url
+    case name
+
+    var menuTitle: String {
+        switch self {
+        case .unix:
+            return "UNIX"
+        case .hfs:
+            return "HFS"
+        case .windows:
+            return "Windows"
+        case .terminal:
+            return "Terminal"
+        case .url:
+            return "URL"
+        case .name:
+            return "Name"
+        }
+    }
+}
+
+enum PathCopyFormatter {
+    static func string(for url: URL, format: PathCopyFormat) -> String {
+        switch format {
+        case .unix:
+            return url.path
+        case .hfs:
+            return hfsPath(for: url)
+        case .windows:
+            return url.path.replacingOccurrences(of: "/", with: "\\")
+        case .terminal:
+            return shellQuotedPath(url.path)
+        case .url:
+            return url.absoluteString
+        case .name:
+            return url.lastPathComponent
+        }
+    }
+
+    private static func hfsPath(for url: URL) -> String {
+        var components = url.pathComponents.filter { $0 != "/" }
+        let volumeName = (try? url.resourceValues(forKeys: [.volumeNameKey]))?.volumeName
+        if let volumeName,
+           !volumeName.isEmpty {
+            components.insert(volumeName, at: 0)
+        }
+        return components.joined(separator: ":")
+    }
+
+    private static func shellQuotedPath(_ path: String) -> String {
+        "'\(path.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
 struct MountedVolume: Hashable {
     static let resourceKeys: Set<URLResourceKey> = [
         .localizedNameKey,
