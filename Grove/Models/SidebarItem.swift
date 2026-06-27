@@ -1,3 +1,4 @@
+import DiskArbitration
 import Foundation
 
 extension Notification.Name {
@@ -63,6 +64,15 @@ enum PathCopyFormatter {
     }
 }
 
+enum MountedVolumeKind: String {
+    case internalDisk = "Internal Disk"
+    case diskImage = "Disk Image"
+    case removable = "Removable"
+    case external = "External"
+    case network = "Network"
+    case localVolume = "Volume"
+}
+
 struct MountedVolume: Hashable {
     static let resourceKeys: Set<URLResourceKey> = [
         .localizedNameKey,
@@ -87,6 +97,8 @@ struct MountedVolume: Hashable {
     let isInternal: Bool
     let isLocal: Bool
     let isReadOnly: Bool
+    let deviceProtocol: String?
+    let deviceModel: String?
     let totalCapacity: Int?
     let availableCapacity: Int?
 
@@ -103,6 +115,7 @@ struct MountedVolume: Hashable {
             values.volumeName ??
             fileManager.displayName(atPath: standardizedURL.path)
         guard !displayName.isEmpty else { return nil }
+        let diskDescription = Self.diskDescription(for: standardizedURL)
 
         self.init(
             url: standardizedURL,
@@ -115,6 +128,8 @@ struct MountedVolume: Hashable {
             isInternal: values.volumeIsInternal ?? false,
             isLocal: values.volumeIsLocal ?? true,
             isReadOnly: values.volumeIsReadOnly ?? false,
+            deviceProtocol: diskDescription?[kDADiskDescriptionDeviceProtocolKey as String] as? String,
+            deviceModel: diskDescription?[kDADiskDescriptionDeviceModelKey as String] as? String,
             totalCapacity: values.volumeTotalCapacity,
             availableCapacity: values.volumeAvailableCapacity
         )
@@ -131,6 +146,8 @@ struct MountedVolume: Hashable {
         isInternal: Bool = false,
         isLocal: Bool = true,
         isReadOnly: Bool = false,
+        deviceProtocol: String? = nil,
+        deviceModel: String? = nil,
         totalCapacity: Int? = nil,
         availableCapacity: Int? = nil
     ) {
@@ -144,6 +161,8 @@ struct MountedVolume: Hashable {
         self.isInternal = isInternal
         self.isLocal = isLocal
         self.isReadOnly = isReadOnly
+        self.deviceProtocol = deviceProtocol
+        self.deviceModel = deviceModel
         self.totalCapacity = totalCapacity
         self.availableCapacity = availableCapacity
     }
@@ -156,18 +175,54 @@ struct MountedVolume: Hashable {
         isEjectable || isRemovable
     }
 
-    var systemImage: String {
+    var kind: MountedVolumeKind {
         if !isLocal {
-            return "network"
+            return .network
         }
         if isInternal {
-            return "internaldrive"
+            return .internalDisk
         }
-        return "externaldrive"
+        if isLikelyDiskImage {
+            return .diskImage
+        }
+        if isRemovable {
+            return .removable
+        }
+        if supportsEject {
+            return .external
+        }
+        return .localVolume
+    }
+
+    var sidebarDetail: String? {
+        kind == .internalDisk ? nil : kind.rawValue
+    }
+
+    private var isLikelyDiskImage: Bool {
+        if deviceProtocol?.localizedCaseInsensitiveCompare("Disk Image") == .orderedSame {
+            return true
+        }
+        if deviceModel?.localizedCaseInsensitiveCompare("Disk Image") == .orderedSame {
+            return true
+        }
+        return isLocal && !isInternal && isEjectable && !isRemovable
+    }
+
+    var systemImage: String {
+        switch kind {
+        case .network:
+            return "network"
+        case .internalDisk:
+            return "internaldrive"
+        case .diskImage:
+            return "opticaldiscdrive"
+        case .removable, .external, .localVolume:
+            return "externaldrive"
+        }
     }
 
     var toolTip: String {
-        var details: [String] = [canonicalURL.path]
+        var details: [String] = [canonicalURL.path, kind.rawValue]
         if isReadOnly {
             details.append("Read Only")
         }
@@ -175,6 +230,15 @@ struct MountedVolume: Hashable {
             details.append("Ejectable")
         }
         return details.joined(separator: "\n")
+    }
+
+    private static func diskDescription(for url: URL) -> [String: Any]? {
+        guard let session = DASessionCreate(kCFAllocatorDefault),
+              let disk = DADiskCreateFromVolumePath(kCFAllocatorDefault, session, url as CFURL),
+              let description = DADiskCopyDescription(disk) as? [String: Any] else {
+            return nil
+        }
+        return description
     }
 
     func contains(_ candidate: URL) -> Bool {
@@ -264,6 +328,10 @@ struct SidebarItem: Hashable {
             return url.path
         }
         return location.displayName
+    }
+
+    var sidebarDetail: String? {
+        mountedVolume?.sidebarDetail
     }
 
     func representsProvider(of otherLocation: StorageLocation) -> Bool {

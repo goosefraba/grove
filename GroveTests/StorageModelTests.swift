@@ -93,11 +93,34 @@ final class StorageModelTests: XCTestCase {
 
         XCTAssertEqual(volume.stableIdentifier, "backup-volume")
         XCTAssertEqual(volume.systemImage, "externaldrive")
+        XCTAssertEqual(volume.kind, .removable)
+        XCTAssertEqual(volume.sidebarDetail, "Removable")
         XCTAssertTrue(volume.supportsEject)
+        XCTAssertTrue(volume.toolTip.contains("Removable"))
         XCTAssertTrue(volume.toolTip.contains("Read Only"))
         XCTAssertTrue(volume.toolTip.contains("Ejectable"))
         XCTAssertTrue(volume.contains(URL(fileURLWithPath: "/Volumes/Backup/Photos")))
         XCTAssertFalse(volume.contains(URL(fileURLWithPath: "/Volumes/Backup Clone")))
+    }
+
+    func testDiskImageMountedVolumeIsLabeledSeparatelyFromInternalDisk() {
+        let volume = MountedVolume(
+            url: URL(fileURLWithPath: "/Volumes/Grove Installer"),
+            displayName: "Grove Installer",
+            uuid: "disk-image-volume",
+            isEjectable: true,
+            isRemovable: true,
+            isInternal: false,
+            isLocal: true,
+            isReadOnly: true,
+            deviceProtocol: "Virtual Interface",
+            deviceModel: "Disk Image"
+        )
+
+        XCTAssertEqual(volume.kind, .diskImage)
+        XCTAssertEqual(volume.systemImage, "opticaldiscdrive")
+        XCTAssertEqual(volume.sidebarDetail, "Disk Image")
+        XCTAssertTrue(volume.toolTip.contains("Disk Image"))
     }
 
     func testInternalMountedVolumeDoesNotAdvertiseEject() {
@@ -110,7 +133,9 @@ final class StorageModelTests: XCTestCase {
             isInternal: true
         )
 
+        XCTAssertEqual(volume.kind, .internalDisk)
         XCTAssertEqual(volume.systemImage, "internaldrive")
+        XCTAssertNil(volume.sidebarDetail)
         XCTAssertFalse(volume.supportsEject)
         XCTAssertTrue(volume.contains(URL(fileURLWithPath: "/Users/test/Documents")))
     }

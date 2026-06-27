@@ -27,6 +27,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private var contextMenuRow: Int?
     private var volumeRefreshWorkItem: DispatchWorkItem?
     private static let sidebarItemPasteboardType = NSPasteboard.PasteboardType("com.grove.sidebaritem")
+    private static let sidebarDetailLabelTag = 1_207
 
     override func loadView() {
         view = NSView()
@@ -379,8 +380,19 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 let tf = NSTextField(labelWithString: "")
                 tf.translatesAutoresizingMaskIntoConstraints = false
                 tf.lineBreakMode = .byTruncatingTail
+                tf.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
                 cell.addSubview(tf)
                 cell.textField = tf
+
+                let detail = NSTextField(labelWithString: "")
+                detail.translatesAutoresizingMaskIntoConstraints = false
+                detail.tag = Self.sidebarDetailLabelTag
+                detail.font = .systemFont(ofSize: 10, weight: .medium)
+                detail.textColor = .tertiaryLabelColor
+                detail.lineBreakMode = .byTruncatingTail
+                detail.setContentCompressionResistancePriority(.required, for: .horizontal)
+                detail.setContentHuggingPriority(.required, for: .horizontal)
+                cell.addSubview(detail)
 
                 NSLayoutConstraint.activate([
                     iv.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
@@ -388,10 +400,16 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                     iv.widthAnchor.constraint(equalToConstant: 16),
                     iv.heightAnchor.constraint(equalToConstant: 16),
                     tf.leadingAnchor.constraint(equalTo: iv.trailingAnchor, constant: 6),
-                    tf.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
+                    tf.trailingAnchor.constraint(lessThanOrEqualTo: detail.leadingAnchor, constant: -6),
                     tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                    detail.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
+                    detail.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
                 ])
             }
+
+            let detail = cell.viewWithTag(Self.sidebarDetailLabelTag) as? NSTextField
+            detail?.stringValue = sidebarItem.sidebarDetail ?? ""
+            detail?.isHidden = sidebarItem.sidebarDetail == nil
 
             cell.textField?.stringValue = sidebarItem.title
             cell.textField?.font = .systemFont(ofSize: GroveUI.sidebarFontSize)
@@ -399,14 +417,34 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 systemSymbolName: sidebarItem.systemImage,
                 accessibilityDescription: sidebarItem.title
             ) ?? NSImage(systemSymbolName: "externaldrive", accessibilityDescription: sidebarItem.title)
-            cell.imageView?.contentTintColor = .controlAccentColor
+            cell.imageView?.contentTintColor = sidebarIconTint(for: sidebarItem)
             cell.toolTip = sidebarItem.toolTip
-            cell.setAccessibilityLabel("\(sidebarItem.title) - \(sidebarItem.toolTip)")
+            let accessibilityLabel = [sidebarItem.title, sidebarItem.sidebarDetail, sidebarItem.toolTip]
+                .compactMap { $0 }
+                .joined(separator: " - ")
+            cell.setAccessibilityLabel(accessibilityLabel)
             cell.setAccessibilityIdentifier("sidebar_\(sidebarItem.title)")
             return cell
         }
 
         return nil
+    }
+
+    private func sidebarIconTint(for item: SidebarItem) -> NSColor {
+        guard let kind = item.mountedVolume?.kind else {
+            return .controlAccentColor
+        }
+
+        switch kind {
+        case .diskImage:
+            return .systemOrange
+        case .network:
+            return .systemTeal
+        case .internalDisk, .localVolume:
+            return .secondaryLabelColor
+        case .removable, .external:
+            return .controlAccentColor
+        }
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {

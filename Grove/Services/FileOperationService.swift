@@ -183,14 +183,13 @@ final class FileOperationService {
 
     func duplicate(_ url: URL) throws -> URL {
         let directory = url.deletingLastPathComponent()
-        let name = url.deletingPathExtension().lastPathComponent
-        let ext = url.pathExtension
+        let nameParts = fileNameParts(for: url)
 
         var counter = 0
         var destURL: URL
         repeat {
             let suffix = counter == 0 ? " copy" : " copy \(counter + 1)"
-            let newName = ext.isEmpty ? "\(name)\(suffix)" : "\(name)\(suffix).\(ext)"
+            let newName = fileName(stem: nameParts.stem, suffix: suffix, fileExtension: nameParts.fileExtension)
             destURL = directory.appendingPathComponent(newName)
             counter += 1
         } while fileManager.fileExists(atPath: destURL.path)
@@ -301,7 +300,12 @@ final class FileOperationService {
         }
 
         guard url.standardizedFileURL != destinationURL.standardizedFileURL else {
-            return []
+            guard operation == .copy else {
+                return []
+            }
+            let copyURL = copySuffixDestination(for: url, in: directory)
+            try performTransfer(url, to: copyURL, operation: operation)
+            return [transferRecord(sourceURL: url, destinationURL: copyURL, operation: operation)]
         }
 
         let conflict = FileConflict(
@@ -420,16 +424,47 @@ final class FileOperationService {
     }
 
     private func uniqueDestination(for url: URL, in directory: URL) -> URL {
-        let name = url.deletingPathExtension().lastPathComponent
-        let ext = url.pathExtension
+        let nameParts = fileNameParts(for: url)
         var destURL = directory.appendingPathComponent(url.lastPathComponent)
         var counter = 1
         while fileManager.fileExists(atPath: destURL.path) {
-            let newName = ext.isEmpty ? "\(name) \(counter)" : "\(name) \(counter).\(ext)"
+            let newName = fileName(stem: nameParts.stem, suffix: " \(counter)", fileExtension: nameParts.fileExtension)
             destURL = directory.appendingPathComponent(newName)
             counter += 1
         }
         return destURL
+    }
+
+    private func copySuffixDestination(for url: URL, in directory: URL) -> URL {
+        let nameParts = fileNameParts(for: url)
+        var counter = 0
+
+        while true {
+            let suffix = counter == 0 ? "_copy" : "_copy_\(counter + 1)"
+            let newName = fileName(stem: nameParts.stem, suffix: suffix, fileExtension: nameParts.fileExtension)
+            let destURL = directory.appendingPathComponent(newName)
+            if !fileManager.fileExists(atPath: destURL.path) {
+                return destURL
+            }
+            counter += 1
+        }
+    }
+
+    private func fileNameParts(for url: URL) -> (stem: String, fileExtension: String) {
+        let filename = url.lastPathComponent
+        let ext = url.pathExtension
+
+        guard !ext.isEmpty,
+              filename.count > ext.count + 1,
+              filename.hasSuffix(".\(ext)") else {
+            return (filename, "")
+        }
+
+        return (String(filename.dropLast(ext.count + 1)), ext)
+    }
+
+    private func fileName(stem: String, suffix: String, fileExtension ext: String) -> String {
+        ext.isEmpty ? "\(stem)\(suffix)" : "\(stem)\(suffix).\(ext)"
     }
 
     private func validatedFileName(_ name: String) throws -> String {

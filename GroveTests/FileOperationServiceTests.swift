@@ -26,6 +26,47 @@ final class FileOperationServiceTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: tempRoot.deletingLastPathComponent().appendingPathComponent("escaped.txt").path))
     }
 
+    func testCopyResolvingConflictsInSameDirectoryUsesCopySuffixBeforeExtension() throws {
+        let source = tempRoot.appendingPathComponent("report.final.pdf")
+        try "data".write(to: source, atomically: true, encoding: .utf8)
+
+        var resolverCallCount = 0
+        let firstRecords = try FileOperationService.shared.copyResolvingConflictsWithRecords([source], to: tempRoot) { _ in
+            resolverCallCount += 1
+            return .skip
+        }
+
+        let firstCopy = tempRoot.appendingPathComponent("report.final_copy.pdf")
+        XCTAssertEqual(resolverCallCount, 0)
+        XCTAssertEqual(firstRecords.map { $0.destinationURL.standardizedFileURL }, [firstCopy.standardizedFileURL])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
+        XCTAssertEqual(try String(contentsOf: firstCopy), "data")
+
+        let secondRecords = try FileOperationService.shared.copyResolvingConflictsWithRecords([source], to: tempRoot) { _ in
+            resolverCallCount += 1
+            return .skip
+        }
+
+        let secondCopy = tempRoot.appendingPathComponent("report.final_copy_2.pdf")
+        XCTAssertEqual(resolverCallCount, 0)
+        XCTAssertEqual(secondRecords.map { $0.destinationURL.standardizedFileURL }, [secondCopy.standardizedFileURL])
+        XCTAssertEqual(try String(contentsOf: secondCopy), "data")
+    }
+
+    func testCopyResolvingConflictsInSameDirectoryUsesCopySuffixWithoutExtension() throws {
+        let source = tempRoot.appendingPathComponent("README")
+        try "data".write(to: source, atomically: true, encoding: .utf8)
+
+        let records = try FileOperationService.shared.copyResolvingConflictsWithRecords([source], to: tempRoot) { _ in
+            XCTFail("Same-directory copy should not show a conflict prompt")
+            return .skip
+        }
+
+        let copy = tempRoot.appendingPathComponent("README_copy")
+        XCTAssertEqual(records.map { $0.destinationURL.standardizedFileURL }, [copy.standardizedFileURL])
+        XCTAssertEqual(try String(contentsOf: copy), "data")
+    }
+
     func testSkippedConflictDoesNotCorruptMoveRecordSource() throws {
         let source = tempRoot.appendingPathComponent("source", isDirectory: true)
         let destination = tempRoot.appendingPathComponent("destination", isDirectory: true)
