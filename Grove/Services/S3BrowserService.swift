@@ -339,6 +339,7 @@ protocol S3Gateway {
 final class S3BrowserService {
     private let gateway: S3Gateway
     private var bucketRegionCache: [String: String] = [:]
+    private let bucketRegionCacheLock = NSLock()
 
     init(gateway: S3Gateway) {
         self.gateway = gateway
@@ -693,7 +694,7 @@ final class S3BrowserService {
 
     private func verifiedRegion(profile: AWSProfile, requestedRegion: String, bucket: String, continuationToken: String?) async throws -> String {
         let cacheKey = "\(profile.name):\(bucket)"
-        if let cached = bucketRegionCache[cacheKey] {
+        if let cached = cachedRegion(forKey: cacheKey) {
             return cached
         }
 
@@ -704,10 +705,10 @@ final class S3BrowserService {
         do {
             if let actual = try await gateway.bucketRegion(profile: profile, region: requestedRegion, bucket: bucket),
                !actual.isEmpty {
-                bucketRegionCache[cacheKey] = actual
+                storeRegion(actual, forKey: cacheKey)
                 return actual
             }
-            bucketRegionCache[cacheKey] = requestedRegion
+            storeRegion(requestedRegion, forKey: cacheKey)
             return requestedRegion
         } catch {
             let classified = S3BrowserError.classify(error, bucket: bucket, requestedRegion: requestedRegion)
@@ -716,6 +717,18 @@ final class S3BrowserService {
             }
             throw classified
         }
+    }
+
+    private func cachedRegion(forKey key: String) -> String? {
+        bucketRegionCacheLock.lock()
+        defer { bucketRegionCacheLock.unlock() }
+        return bucketRegionCache[key]
+    }
+
+    private func storeRegion(_ region: String, forKey key: String) {
+        bucketRegionCacheLock.lock()
+        defer { bucketRegionCacheLock.unlock() }
+        bucketRegionCache[key] = region
     }
 
     private static func checkCancellation() throws {
