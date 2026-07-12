@@ -1,3 +1,4 @@
+import Darwin
 import DiskArbitration
 import Foundation
 
@@ -20,7 +21,7 @@ enum PathCopyFormat: CaseIterable {
         case .hfs:
             return "HFS"
         case .windows:
-            return "Windows"
+            return "Windows (UNC)"
         case .terminal:
             return "Terminal"
         case .url:
@@ -39,7 +40,7 @@ enum PathCopyFormatter {
         case .hfs:
             return hfsPath(for: url)
         case .windows:
-            return url.path.replacingOccurrences(of: "/", with: "\\")
+            return windowsPath(for: url)
         case .terminal:
             return shellQuotedPath(url.path)
         case .url:
@@ -71,6 +72,82 @@ enum PathCopyFormatter {
             result.insert(bootVolumeName, at: 0)
         }
         return result.joined(separator: ":")
+    }
+
+    /// Produces a Windows-oriented path.
+    ///
+    /// SMB/CIFS network mounts map to a genuine UNC path (`\\server\share\...`),
+    /// which is the only form usable for real Windows interop or SMB access.
+    /// Local volumes have no drive letter or UNC form, so they fall back to a
+    /// backslash-separated POSIX path — not a valid Windows path, hence the
+    /// "Windows (UNC)" menu title reflects that UNC is the meaningful case.
+    private static func windowsPath(for url: URL) -> String {
+        if let mount = mountInfo(for: url.path),
+           let unc = windowsUNCPath(
+               mountFromName: mount.from,
+               mountPoint: mount.on,
+               filePath: url.path
+           ) {
+            return unc
+        }
+        return url.path.replacingOccurrences(of: "/", with: "\\")
+    }
+
+    /// Converts an SMB mount into a UNC path for a file below the mount point.
+    ///
+    /// Returns `nil` when the mount source is not an SMB/CIFS share.
+    static func windowsUNCPath(mountFromName: String, mountPoint: String, filePath: String) -> String? {
+        guard let (server, share) = parseSMBMount(mountFromName) else { return nil }
+        var unc = "\\\\\(server)\\\(share)"
+        let relative = relativePath(filePath, under: mountPoint)
+        if !relative.isEmpty {
+            unc += "\\" + relative.replacingOccurrences(of: "/", with: "\\")
+        }
+        return unc
+    }
+
+    /// Parses `//[user@]server/share`, `smb://[user@]server/share`, or
+    /// `//[user@]server/share/sub` into its server and top-level share.
+    private static func parseSMBMount(_ mountFromName: String) -> (server: String, share: String)? {
+        var remainder = mountFromName
+        for scheme in ["smb://", "cifs://"] {
+            if remainder.lowercased().hasPrefix(scheme) {
+                remainder = String(remainder.dropFirst(scheme.count))
+            }
+        }
+        guard remainder.hasPrefix("//") else { return nil }
+        remainder = String(remainder.dropFirst(2))
+
+        let segments = remainder.split(separator: "/", omittingEmptySubsequences: true)
+        guard segments.count >= 2 else { return nil }
+
+        var host = String(segments[0])
+        if let atIndex = host.lastIndex(of: "@") {
+            host = String(host[host.index(after: atIndex)...])
+        }
+        guard !host.isEmpty else { return nil }
+        return (host, String(segments[1]))
+    }
+
+    /// Returns the portion of `path` that lies below `base`, or "" if `path`
+    /// equals `base` or is not contained by it.
+    private static func relativePath(_ path: String, under base: String) -> String {
+        let base = base == "/" ? "" : base
+        guard path.hasPrefix(base) else { return "" }
+        return String(path.dropFirst(base.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    /// Looks up the filesystem mount source and mount point for a path.
+    private static func mountInfo(for path: String) -> (from: String, on: String)? {
+        var stat = statfs()
+        guard statfs(path, &stat) == 0 else { return nil }
+        let from = withUnsafeBytes(of: stat.f_mntfromname) { raw in
+            String(cString: raw.bindMemory(to: CChar.self).baseAddress!)
+        }
+        let on = withUnsafeBytes(of: stat.f_mntonname) { raw in
+            String(cString: raw.bindMemory(to: CChar.self).baseAddress!)
+        }
+        return (from, on)
     }
 
     private static func shellQuotedPath(_ path: String) -> String {

@@ -37,4 +37,51 @@ final class PathCopyFormatterTests: XCTestCase {
         )
         XCTAssertEqual(result, "Macintosh HD:Volumes")
     }
+
+    // MARK: - Windows / UNC paths (#28)
+
+    func testWindowsUNCPathFromSMBMount() {
+        let result = PathCopyFormatter.windowsUNCPath(
+            mountFromName: "//user@server/share",
+            mountPoint: "/Volumes/share",
+            filePath: "/Volumes/share/dir/file.txt"
+        )
+        XCTAssertEqual(result, #"\\server\share\dir\file.txt"#)
+    }
+
+    func testWindowsUNCPathFromSMBMountAtShareRoot() {
+        let result = PathCopyFormatter.windowsUNCPath(
+            mountFromName: "//server/share",
+            mountPoint: "/Volumes/share",
+            filePath: "/Volumes/share"
+        )
+        XCTAssertEqual(result, #"\\server\share"#)
+    }
+
+    func testWindowsUNCPathWithSMBSchemePrefix() {
+        let result = PathCopyFormatter.windowsUNCPath(
+            mountFromName: "smb://server/share",
+            mountPoint: "/Volumes/share",
+            filePath: "/Volumes/share/file"
+        )
+        XCTAssertEqual(result, #"\\server\share\file"#)
+    }
+
+    func testWindowsUNCPathReturnsNilForLocalMount() {
+        let result = PathCopyFormatter.windowsUNCPath(
+            mountFromName: "/dev/disk1s1",
+            mountPoint: "/",
+            filePath: "/Users/x/file"
+        )
+        XCTAssertNil(result)
+    }
+
+    func testWindowsFormatFallsBackToBackslashForLocalPath() {
+        // A real local path (home directory) is not an SMB mount, so the copied
+        // value is the documented backslash-separated fallback.
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let result = PathCopyFormatter.string(for: home, format: .windows)
+        XCTAssertEqual(result, home.path.replacingOccurrences(of: "/", with: "\\"))
+        XCTAssertFalse(result.contains("/"))
+    }
 }
