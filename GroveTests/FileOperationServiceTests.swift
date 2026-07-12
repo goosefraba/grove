@@ -127,6 +127,27 @@ final class FileOperationServiceTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: destinationFile), "original")
     }
 
+    func testDestinationIsWithinDetectsSelfChildAndDescendantButNotPrefixSibling() {
+        XCTAssertTrue(FileOperationService.destination("/foo", isWithin: "/foo"))            // identical path
+        XCTAssertTrue(FileOperationService.destination("/foo/bar", isWithin: "/foo"))        // direct child
+        XCTAssertTrue(FileOperationService.destination("/foo/bar/baz", isWithin: "/foo"))    // deep descendant
+        XCTAssertFalse(FileOperationService.destination("/foobar", isWithin: "/foo"))        // sibling common prefix
+        XCTAssertFalse(FileOperationService.destination("/foo", isWithin: "/foo/bar"))       // parent is not within child
+    }
+
+    func testCopyIntoOwnSubfolderIsRejected() throws {
+        let folder = tempRoot.appendingPathComponent("A", isDirectory: true)
+        let sub = folder.appendingPathComponent("B", isDirectory: true)
+        try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
+
+        XCTAssertThrowsError(try FileOperationService.shared.copyResolvingConflictsWithRecords([folder], to: sub) { _ in .keepBoth }) { error in
+            guard case FileOperationService.FileOperationError.invalidDestination = error else {
+                return XCTFail("Expected invalidDestination, got \(error)")
+            }
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sub.appendingPathComponent("A").path))
+    }
+
     func testAvailableDiskCapacityUsesActualFreeVolumeCapacity() throws {
         let values = try tempRoot.resourceValues(forKeys: [
             .volumeAvailableCapacityKey,

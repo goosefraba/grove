@@ -37,6 +37,7 @@ final class FileOperationService {
 
     enum FileOperationError: LocalizedError {
         case invalidFileName(String)
+        case invalidDestination(operationIsMove: Bool)
         case cancelled(records: [FileTransferRecord])
         case partialFailure(records: [FileTransferRecord], underlying: Error)
 
@@ -44,6 +45,10 @@ final class FileOperationService {
             switch self {
             case .invalidFileName(let name):
                 return "Invalid file name: \(name)"
+            case .invalidDestination(let operationIsMove):
+                return operationIsMove
+                    ? "You can't move an item into itself."
+                    : "You can't copy an item into itself."
             case .cancelled:
                 return "File operation cancelled."
             case .partialFailure(_, let underlying):
@@ -221,6 +226,7 @@ final class FileOperationService {
     // MARK: - Progress Operations
 
     func copyWithProgress(_ urls: [URL], to destination: URL, progress: @escaping (Double, String) -> Void, cancelled: @escaping () -> Bool) throws -> [URL] {
+        try validateTransferDestination(urls, to: destination, operationIsMove: false)
         var records: [FileTransferRecord] = []
         let totalBytes = byteSize(of: urls)
         var completedBytes: Int64 = 0
@@ -248,6 +254,7 @@ final class FileOperationService {
     }
 
     func moveWithProgress(_ urls: [URL], to destination: URL, progress: @escaping (Double, String) -> Void, cancelled: @escaping () -> Bool) throws -> [URL] {
+        try validateTransferDestination(urls, to: destination, operationIsMove: true)
         var records: [FileTransferRecord] = []
         let totalBytes = byteSize(of: urls)
         var completedBytes: Int64 = 0
@@ -291,12 +298,31 @@ final class FileOperationService {
         }
     }
 
+    /// True when `destinationPath` is `sourcePath` itself or lives inside its subtree.
+    /// Uses path-component boundaries so `/foo` is not treated as an ancestor of `/foobar`.
+    static func destination(_ destinationPath: String, isWithin sourcePath: String) -> Bool {
+        let dest = (destinationPath as NSString).standardizingPath
+        let source = (sourcePath as NSString).standardizingPath
+        if dest == source { return true }
+        return dest.hasPrefix(source.hasSuffix("/") ? source : source + "/")
+    }
+
+    /// Rejects transfers where the destination is one of the sources or nested inside it
+    /// (Finder-style guard). Sibling copies into the same parent remain allowed.
+    private func validateTransferDestination(_ urls: [URL], to destination: URL, operationIsMove: Bool) throws {
+        let destPath = destination.standardizedFileURL.path
+        for url in urls where Self.destination(destPath, isWithin: url.standardizedFileURL.path) {
+            throw FileOperationError.invalidDestination(operationIsMove: operationIsMove)
+        }
+    }
+
     private func transfer(
         _ urls: [URL],
         to destination: URL,
         operation: TransferOperation,
         resolver: (FileConflict) -> ConflictResolution
     ) throws -> [FileTransferRecord] {
+        try validateTransferDestination(urls, to: destination, operationIsMove: operation == .move)
         var records: [FileTransferRecord] = []
 
         for url in urls {
