@@ -84,8 +84,8 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
         columnPaths.removeAll()
 
         watcher?.stop()
-        watcher = DirectoryWatcher(url: url) { [weak self] _ in
-            self?.scheduleReload()
+        watcher = DirectoryWatcher(url: url) { [weak self] changedPaths in
+            self?.scheduleReload(changedPaths: changedPaths)
         }
 
         // Build column hierarchy from root URL
@@ -162,14 +162,65 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
         FileItem.sort(&items, key: sortKey, ascending: sortAscending)
     }
 
-    private func scheduleReload() {
+    private func scheduleReload(changedPaths: [URL]) {
         reloadWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self = self else { return }
-            self.loadDirectory(self.currentURL)
+            self?.reloadChangedColumns(changedPaths)
         }
         reloadWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+
+    /// Reload only the columns whose directory directly contains a changed path, preserving
+    /// selection and the rest of the navigation. Falls back to nothing when no column matches.
+    private func reloadChangedColumns(_ changedPaths: [URL]) {
+        let changedDirs = Set(changedPaths.map { $0.deletingLastPathComponent().standardizedFileURL.path })
+        let changedSelf = Set(changedPaths.map { $0.standardizedFileURL.path })
+        let affectedColumns = columnPaths.filter { column in
+            let path = column.value.standardizedFileURL.path
+            return changedDirs.contains(path) || changedSelf.contains(path)
+        }.map(\.key)
+
+        for column in affectedColumns {
+            reloadColumnAsync(column)
+        }
+    }
+
+    private func reloadColumnAsync(_ column: Int) {
+        guard let dir = columnPaths[column] else { return }
+        let requestDir = dir.standardizedFileURL
+        let requestShowHidden = showHiddenFiles
+
+        // Capture the current selection by URL so it can be restored if the item survives.
+        let selectedURLs: Set<URL>
+        if let rows = browser.selectedRowIndexes(inColumn: column), let items = columnItems[column] {
+            selectedURLs = Set(rows.compactMap { $0 < items.count ? items[$0].url.standardizedFileURL : nil })
+        } else {
+            selectedURLs = []
+        }
+
+        FileOperationService.shared.contentsOfDirectoryAsync(at: requestDir, showHidden: requestShowHidden) { [weak self] result in
+            guard let self = self,
+                  self.columnPaths[column]?.standardizedFileURL == requestDir,
+                  self.showHiddenFiles == requestShowHidden,
+                  case .success(var items) = result else { return }
+
+            self.sortItems(&items)
+            // Keep the descendant that feeds the next column visible even if hidden-file rules would drop it.
+            if let nextURL = self.columnPaths[column + 1] {
+                items = self.itemsIncludingPathComponent(nextURL, in: items)
+            }
+            self.columnItems[column] = items
+            self.browser.reloadColumn(column)
+
+            if !selectedURLs.isEmpty {
+                for (row, item) in items.enumerated()
+                where selectedURLs.contains(item.url.standardizedFileURL) {
+                    self.browser.selectRow(row, inColumn: column)
+                }
+            }
+            self.updateStatusBar()
+        }
     }
 
     func toggleHiddenFiles() {
