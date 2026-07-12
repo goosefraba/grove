@@ -45,7 +45,7 @@ final class AWSS3Gateway: S3Gateway {
         let output = try await withClient(profile: profile, region: region) { client in
             try await client.getBucketLocation(input: GetBucketLocationInput(bucket: bucket))
         }
-        return normalizedRegion(output.locationConstraint?.rawValue, fallback: region)
+        return normalizedRegion(output.locationConstraint?.rawValue)
     }
 
     func listObjects(location: S3Location, continuationToken: String?, maxKeys: Int) async throws -> S3RawListPage {
@@ -350,7 +350,11 @@ final class AWSS3Gateway: S3Gateway {
         )
     }
 
-    private func normalizedRegion(_ value: String?, fallback: String) -> String {
+    // GetBucketLocation returns a nil/empty LocationConstraint for us-east-1 and
+    // the legacy value "EU" for eu-west-1; every other region is reported verbatim.
+    // A nil constraint therefore always maps to us-east-1, regardless of the region
+    // the request was issued against, so there is no meaningful caller-supplied fallback.
+    private func normalizedRegion(_ value: String?) -> String {
         guard let value, !value.isEmpty else { return "us-east-1" }
         if value.lowercased() == "eu" { return "eu-west-1" }
         return value
