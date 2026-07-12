@@ -59,8 +59,7 @@ struct FileItem: Identifiable, Hashable {
         String(format: "%o", posixPermissions)
     }
 
-    var imageDimensions: NSSize? {
-        guard isImage else { return nil }
+    static func imageDimensions(for url: URL) -> NSSize? {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
               let width = properties[kCGImagePropertyPixelWidth] as? Int,

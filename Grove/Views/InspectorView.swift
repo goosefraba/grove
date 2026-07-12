@@ -26,54 +26,10 @@ struct InspectorView: View {
     private func singleSelectionView(_ item: BrowserItem) -> some View {
         switch item {
         case .local(let fileItem):
-            localSelectionView(fileItem)
+            LocalSelectionView(item: fileItem)
         case .s3(let s3Item):
             s3SelectionView(s3Item)
         }
-    }
-
-    private func localSelectionView(_ item: FileItem) -> some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path))
-                    .resizable()
-                    .frame(width: 64, height: 64)
-
-                Text(item.name)
-                    .font(.headline)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-
-                Divider()
-
-                DetailRow(label: "Kind", value: item.kind)
-                DetailRow(label: "Size", value: item.formattedSize)
-                DetailRow(label: "Modified", value: formattedDate(item.dateModified))
-                DetailRow(label: "Created", value: formattedDate(item.dateCreated))
-                DetailRow(label: "Permissions", value: "\(item.formattedPermissions) (\(item.octalPermissions))")
-
-                if item.isImage, let dimensions = item.imageDimensions {
-                    DetailRow(label: "Dimensions", value: "\(Int(dimensions.width)) \u{00D7} \(Int(dimensions.height))")
-                }
-
-                DetailRow(label: "Path", value: (item.url.path as NSString).abbreviatingWithTildeInPath)
-
-                if !item.tags.isEmpty {
-                    Divider()
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Tags")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        TagView(tags: item.tagMetadata)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                Spacer()
-            }
-            .padding()
-        }
-        .frame(minWidth: 200)
     }
 
     private func s3SelectionView(_ item: S3Item) -> some View {
@@ -199,21 +155,87 @@ struct InspectorView: View {
 
     // MARK: - Helpers
 
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        formatter.doesRelativeDateFormatting = true
-        return formatter
-    }()
-
-    private func formattedDate(_ date: Date) -> String {
-        Self.dateFormatter.string(from: date)
-    }
-
     private func formattedOptionalDate(_ date: Date?) -> String {
         guard let date else { return "--" }
-        return formattedDate(date)
+        return inspectorFormattedDate(date)
+    }
+}
+
+private let inspectorDateFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .short
+    formatter.doesRelativeDateFormatting = true
+    return formatter
+}()
+
+private func inspectorFormattedDate(_ date: Date) -> String {
+    inspectorDateFormatter.string(from: date)
+}
+
+// Loads icon and image dimensions off the main thread once per selection,
+// instead of doing disk I/O in the SwiftUI body on every render.
+private struct LocalSelectionView: View {
+    let item: FileItem
+
+    @State private var icon: NSImage?
+    @State private var dimensions: NSSize?
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                Image(nsImage: icon ?? NSImage())
+                    .resizable()
+                    .frame(width: 64, height: 64)
+
+                Text(item.name)
+                    .font(.headline)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+
+                Divider()
+
+                DetailRow(label: "Kind", value: item.kind)
+                DetailRow(label: "Size", value: item.formattedSize)
+                DetailRow(label: "Modified", value: item.metadataUnavailable ? "--" : inspectorFormattedDate(item.dateModified))
+                DetailRow(label: "Created", value: item.metadataUnavailable ? "--" : inspectorFormattedDate(item.dateCreated))
+                DetailRow(label: "Permissions", value: item.metadataUnavailable ? "--" : "\(item.formattedPermissions) (\(item.octalPermissions))")
+
+                if item.isImage, let dimensions {
+                    DetailRow(label: "Dimensions", value: "\(Int(dimensions.width)) \u{00D7} \(Int(dimensions.height))")
+                }
+
+                DetailRow(label: "Path", value: (item.url.path as NSString).abbreviatingWithTildeInPath)
+
+                if !item.tags.isEmpty {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Tags")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TagView(tags: item.tagMetadata)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                Spacer()
+            }
+            .padding()
+        }
+        .frame(minWidth: 200)
+        .task(id: item.url) {
+            icon = nil
+            dimensions = nil
+            let url = item.url
+            let isImage = item.isImage
+            let loaded = await Task.detached(priority: .userInitiated) { () -> (NSImage, NSSize?) in
+                let icon = NSWorkspace.shared.icon(forFile: url.path)
+                let dims = isImage ? FileItem.imageDimensions(for: url) : nil
+                return (icon, dims)
+            }.value
+            icon = loaded.0
+            dimensions = loaded.1
+        }
     }
 }
 
