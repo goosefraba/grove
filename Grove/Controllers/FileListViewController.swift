@@ -117,6 +117,11 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     private let searchScopeLabel = NSTextField(labelWithString: "")
     private let loadingSpinner = NSProgressIndicator()
 
+    // Scroll view top pins to the view (label hidden) or the label's bottom (label shown).
+    // Both built once; toggle isActive instead of creating constraints per toggle.
+    private var scrollTopToView: NSLayoutConstraint?
+    private var scrollTopToLabel: NSLayoutConstraint?
+
     private var allItems: [FileItem] = []
     private var items: [FileItem] = []
     private var sortKey: String = "name"
@@ -143,7 +148,10 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     private var spinnerWorkItem: DispatchWorkItem?
     private var loadGeneration: UInt = 0
     private static let fileOperationPasteboardType = NSPasteboard.PasteboardType("com.grove.file-operation")
-    private static var clipboard: (urls: [URL], isCut: Bool)?
+    // Cached set of cut file URLs, derived from the general pasteboard. Recomputed only when
+    // the pasteboard's changeCount changes so cell rendering stays cheap.
+    private var cachedCutChangeCount: Int = -1
+    private var cachedCutURLs: Set<URL> = []
     private var editingRow: Int = -1
     private var editingURL: URL?
     private var pendingSelectionURL: URL?
@@ -265,7 +273,6 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         view.addSubview(separator)
 
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: view.topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: separator.topAnchor),
@@ -325,6 +332,10 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
             searchScopeLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             searchScopeLabel.heightAnchor.constraint(equalToConstant: 22),
         ])
+
+        scrollTopToView = scrollView.topAnchor.constraint(equalTo: view.topAnchor)
+        scrollTopToLabel = scrollView.topAnchor.constraint(equalTo: searchScopeLabel.bottomAnchor)
+        scrollTopToView?.isActive = true
     }
 
     private func setupAccessibility() {
@@ -416,15 +427,12 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     }
 
     private func updateScrollViewTop() {
-        for constraint in view.constraints {
-            if constraint.firstItem === scrollView && constraint.firstAnchor === scrollView.topAnchor {
-                constraint.isActive = false
-            }
-        }
         if searchScopeLabel.isHidden {
-            scrollView.topAnchor.constraint(equalTo: view.topAnchor).isActive = true
+            scrollTopToLabel?.isActive = false
+            scrollTopToView?.isActive = true
         } else {
-            scrollView.topAnchor.constraint(equalTo: searchScopeLabel.bottomAnchor).isActive = true
+            scrollTopToView?.isActive = false
+            scrollTopToLabel?.isActive = true
         }
         view.needsLayout = true
     }
@@ -594,10 +602,21 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
     private static let sortPreferencesKey = "directorySortPreferences"
     private static let maxSortPreferences = 200
+    // lastAccessed bookkeeping accumulated in memory to avoid a UserDefaults write on every
+    // navigation; merged into the persisted dictionary only when a save actually happens.
+    private static var pendingAccessTimestamps: [String: TimeInterval] = [:]
 
     private func saveSortPreference() {
         let defaults = UserDefaults.standard
         var prefs = defaults.dictionary(forKey: Self.sortPreferencesKey) as? [String: [String: Any]] ?? [:]
+        // Apply deferred access timestamps so LRU eviction reflects recent navigation.
+        for (path, ts) in Self.pendingAccessTimestamps {
+            if var entry = prefs[path] {
+                entry["lastAccessed"] = ts
+                prefs[path] = entry
+            }
+        }
+        Self.pendingAccessTimestamps.removeAll()
         let path = currentURL.path
         prefs[path] = [
             "sortKey": sortKey,
@@ -633,12 +652,9 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         sortAscending = ascending
         applySortDescriptorToTableView()
 
-        // Update lastAccessed timestamp
-        var updatedPrefs = prefs
-        var updatedEntry = entry
-        updatedEntry["lastAccessed"] = Date().timeIntervalSince1970
-        updatedPrefs[url.path] = updatedEntry
-        defaults.set(updatedPrefs, forKey: Self.sortPreferencesKey)
+        // Defer lastAccessed bookkeeping to the next save instead of rewriting the whole
+        // dictionary on every navigation.
+        Self.pendingAccessTimestamps[url.path] = Date().timeIntervalSince1970
     }
 
     private func applySortDescriptorToTableView() {
@@ -698,23 +714,46 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     func copySelectedFiles() {
         let urls = selectedItems.map(\.url)
         guard !urls.isEmpty else { return }
-        Self.clipboard = (urls: urls, isCut: false)
 
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.writeObjects(urls as [NSURL])
         pb.setString("copy", forType: Self.fileOperationPasteboardType)
+        refreshCutIndication()
     }
 
     func cutSelectedFiles() {
         let urls = selectedItems.map(\.url)
         guard !urls.isEmpty else { return }
-        Self.clipboard = (urls: urls, isCut: true)
 
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.writeObjects(urls as [NSURL])
         pb.setString("cut", forType: Self.fileOperationPasteboardType)
+        refreshCutIndication()
+    }
+
+    /// Set of file URLs currently marked as cut on the general pasteboard.
+    private func cutURLs() -> Set<URL> {
+        let pb = NSPasteboard.general
+        if pb.changeCount != cachedCutChangeCount {
+            cachedCutChangeCount = pb.changeCount
+            if pb.string(forType: Self.fileOperationPasteboardType) == "cut",
+               let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] {
+                cachedCutURLs = Set(urls.map { $0.standardizedFileURL })
+            } else {
+                cachedCutURLs = []
+            }
+        }
+        return cachedCutURLs
+    }
+
+    /// Redraw visible rows so cut files dim (and previously-cut files un-dim) immediately.
+    private func refreshCutIndication() {
+        cachedCutChangeCount = -1
+        let rows = IndexSet(integersIn: 0..<items.count)
+        let cols = IndexSet(integersIn: 0..<tableView.numberOfColumns)
+        tableView.reloadData(forRowIndexes: rows, columnIndexes: cols)
     }
 
     func pasteFiles() {
@@ -723,14 +762,15 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
             .urlReadingFileURLsOnly: true
         ]) as? [URL], !urls.isEmpty else { return }
 
+        // Cut vs copy is determined solely by the private pasteboard type written atomically
+        // with the URLs, so it stays correct across app relaunch and window boundaries.
         let isCut = pb.string(forType: Self.fileOperationPasteboardType) == "cut"
-            || (Self.clipboard?.isCut == true && Self.clipboard?.urls == urls)
         let destination = currentURL
 
         // Use progress sheet for operations with more than 3 files
         if urls.count > 3,
            !FileOperationService.shared.hasNameConflicts(urls, in: destination),
-           let window = view.window {
+           view.window != nil {
             let progressVC = FileProgressViewController()
 
             presentAsSheet(progressVC)
@@ -744,9 +784,9 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
                             }
                         }, cancelled: { progressVC.isCancelled })
                         DispatchQueue.main.async {
-                            Self.clipboard = nil
                             NSPasteboard.general.clearContents()
                             self?.registerUndoMove(originalURLs: urls, movedURLs: movedURLs)
+                            self?.refreshCutIndication()
                         }
                     } else {
                         let copiedURLs = try FileOperationService.shared.copyWithProgress(urls, to: destination, progress: { value, name in
@@ -759,25 +799,21 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
                         }
                     }
                     DispatchQueue.main.async {
-                        window.endSheet(window.attachedSheet ?? NSWindow())
                         self?.dismiss(progressVC)
                     }
                 } catch FileOperationService.FileOperationError.cancelled(let records) {
                     DispatchQueue.main.async {
                         self?.registerUndoTransfer(records: records, actionName: isCut ? "Move" : "Copy")
-                        window.endSheet(window.attachedSheet ?? NSWindow())
                         self?.dismiss(progressVC)
                     }
                 } catch FileOperationService.FileOperationError.partialFailure(let records, let underlying) {
                     DispatchQueue.main.async {
                         self?.registerUndoTransfer(records: records, actionName: isCut ? "Move" : "Copy")
-                        window.endSheet(window.attachedSheet ?? NSWindow())
                         self?.dismiss(progressVC)
                         self?.showError(underlying)
                     }
                 } catch {
                     DispatchQueue.main.async {
-                        window.endSheet(window.attachedSheet ?? NSWindow())
                         self?.dismiss(progressVC)
                         self?.showError(error)
                     }
@@ -787,9 +823,9 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
             do {
                 let records = try transferFiles(urls, to: destination, isMove: isCut)
                 if isCut {
-                    Self.clipboard = nil
                     pb.clearContents()
                     registerUndoTransfer(records: records, actionName: "Move")
+                    refreshCutIndication()
                 } else {
                     registerUndoTransfer(records: records, actionName: "Copy")
                 }
@@ -849,13 +885,18 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     }
 
     func openSelectedFile() {
-        for item in selectedItems {
-            if item.isDirectory && !item.isPackage {
-                delegate?.fileListDidNavigate(to: item.url.resolvingSymlinksInPath())
-                return
-            } else {
-                FileOperationService.shared.openFile(item.url)
-            }
+        // Partition so a directory in the selection never short-circuits the loop and
+        // drops the files after it. Open every file, then navigate to the first selected
+        // directory (multiple directories: navigate to the first in selection order).
+        let selection = selectedItems
+        let directories = selection.filter { $0.isDirectory && !$0.isPackage }
+        let files = selection.filter { !($0.isDirectory && !$0.isPackage) }
+
+        for item in files {
+            FileOperationService.shared.openFile(item.url)
+        }
+        if let firstDir = directories.first {
+            delegate?.fileListDidNavigate(to: firstDir.url.resolvingSymlinksInPath())
         }
     }
 
@@ -1129,6 +1170,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         }
 
         cell.textField?.font = .systemFont(ofSize: GroveUI.contentFontSize)
+        // Dim rows whose files are currently cut, matching Finder.
+        cell.alphaValue = cutURLs().contains(item.url.standardizedFileURL) ? 0.5 : 1.0
 
         switch columnID {
         case nameColumn:
@@ -1287,6 +1330,20 @@ extension FileListViewController: NSTextFieldDelegate {
         editingRow = -1
         editingURL = nil
         return true
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        // Escape cancels the rename via the field editor without firing textShouldEndEditing,
+        // which would otherwise leave editingRow/editingURL/isEditable stale for the next edit.
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            control.abortEditing()
+            (control as? NSTextField)?.isEditable = false
+            editingRow = -1
+            editingURL = nil
+            view.window?.makeFirstResponder(tableView)
+            return true
+        }
+        return false
     }
 }
 
@@ -1667,6 +1724,22 @@ extension FileListViewController: NSMenuDelegate {
         if let appleScript = NSAppleScript(source: script) {
             var error: NSDictionary?
             appleScript.executeAndReturnError(&error)
+            if error != nil {
+                showTerminalPermissionError()
+            }
+        }
+    }
+
+    private func showTerminalPermissionError() {
+        let alert = NSAlert()
+        alert.messageText = "Couldn't Open Terminal"
+        alert.informativeText = "Grove needs permission to control Terminal. Open System Settings > Privacy & Security > Automation and enable Terminal under Grove, then try again."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        if let window = view.window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
         }
     }
 
