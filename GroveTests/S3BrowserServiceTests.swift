@@ -1,5 +1,8 @@
 import XCTest
 @testable import Grove
+#if canImport(AWSSDKIdentity)
+import AWSSDKIdentity
+#endif
 
 final class S3BrowserServiceTests: XCTestCase {
     private let profile = AWSProfile(
@@ -343,6 +346,81 @@ final class S3BrowserServiceTests: XCTestCase {
         XCTAssertEqual(names, ["app copy.log", "app copy 2.log", "app copy 3.log"])
     }
 
+    #if canImport(AWSS3) && canImport(AWSSDKIdentity)
+    func testSSOCredentialCacheHitMissExpirationAndInvalidation() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cacheDir = directory.appendingPathComponent("cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+
+        let configURL = directory.appendingPathComponent("config")
+        try """
+        [profile sso-ops]
+        sso_session = my-sso
+        sso_account_id = 111122223333
+        sso_role_name = ReadOnly
+
+        [sso-session my-sso]
+        sso_region = eu-central-1
+        sso_start_url = https://example.awsapps.com/start
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+
+        let store = AWSProfileStore(configURL: configURL, credentialsURL: directory.appendingPathComponent("credentials"))
+        let fixedNow = Date(timeIntervalSince1970: 1_000_000)
+
+        func makeProvider(expirationOffset: TimeInterval, counter: SSOFetchCounter) throws -> NoRefreshSSOCredentialProvider {
+            var provider = NoRefreshSSOCredentialProvider(profileStore: store)
+            provider.now = { fixedNow }
+            provider.cacheDirectory = cacheDir
+            let tokenURL = cacheDir.appendingPathComponent(provider.cachedTokenFileName(for: "my-sso"))
+            try #"{"accessToken":"tok-abc","expiresAt":"2030-01-01T00:00:00Z"}"#
+                .write(to: tokenURL, atomically: true, encoding: .utf8)
+            let expirationMs = Int64((fixedNow.timeIntervalSince1970 + expirationOffset) * 1000)
+            provider.roleCredentialLoader = { request in
+                counter.increment()
+                let json = "{\"roleCredentials\":{\"accessKeyId\":\"AKIAEXAMPLE\",\"secretAccessKey\":\"secret\",\"sessionToken\":\"session\",\"expiration\":\(expirationMs)}}"
+                let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+                return (Data(json.utf8), response)
+            }
+            return provider
+        }
+
+        // Cache miss, then hit: two resolves trigger exactly one fetch.
+        let validCounter = SSOFetchCounter()
+        let provider = try makeProvider(expirationOffset: 3600, counter: validCounter)
+        let first = try await provider.resolve(profileName: "sso-ops")
+        XCTAssertEqual(first.accessKey, "AKIAEXAMPLE")
+        _ = try await provider.resolve(profileName: "sso-ops")
+        XCTAssertEqual(validCounter.value, 1, "Second resolve should hit the cache")
+
+        // Invalidation forces exactly one more fetch.
+        provider.invalidate(profileName: "sso-ops")
+        _ = try await provider.resolve(profileName: "sso-ops")
+        XCTAssertEqual(validCounter.value, 2, "Invalidation should force a refresh")
+
+        // Near-expiry credentials are treated as stale and refetched every time.
+        let expiringCounter = SSOFetchCounter()
+        let expiringProvider = try makeProvider(expirationOffset: 100, counter: expiringCounter)
+        _ = try await expiringProvider.resolve(profileName: "sso-ops")
+        _ = try await expiringProvider.resolve(profileName: "sso-ops")
+        XCTAssertEqual(expiringCounter.value, 2, "Expired credentials should refresh on each resolve")
+    }
+    #endif
+}
+
+private final class SSOFetchCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+        lock.lock(); defer { lock.unlock() }
+        return count
+    }
+
+    func increment() {
+        lock.lock(); defer { lock.unlock() }
+        count += 1
+    }
 }
 
 private final class MockS3Gateway: S3Gateway {

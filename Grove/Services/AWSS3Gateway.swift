@@ -13,8 +13,18 @@ final class AWSS3Gateway: S3Gateway {
         let region: String?
     }
 
+    private struct CachedSSOClient {
+        let client: S3Client
+        let expiration: Date?
+    }
+
+    // Reuse cached credentials/clients until this margin before their expiry, then refresh once.
+    private static let credentialRefreshMargin: TimeInterval = 300
+
     private let profileStore: AWSProfileStore
     private var clients: [ClientKey: S3Client] = [:]
+    private var ssoClients: [ClientKey: CachedSSOClient] = [:]
+    private lazy var ssoCredentialProvider = NoRefreshSSOCredentialProvider(profileStore: profileStore)
     private let lock = NSLock()
 
     init(profileStore: AWSProfileStore = AWSProfileStore()) {
@@ -22,8 +32,9 @@ final class AWSS3Gateway: S3Gateway {
     }
 
     func listBuckets(profile: AWSProfile, region: String?) async throws -> [S3BucketSummary] {
-        let client = try await client(profile: profile, region: region)
-        let output = try await client.listBuckets(input: ListBucketsInput())
+        let output = try await withClient(profile: profile, region: region) { client in
+            try await client.listBuckets(input: ListBucketsInput())
+        }
         return (output.buckets ?? []).compactMap { bucket in
             guard let name = bucket.name, !name.isEmpty else { return nil }
             return S3BucketSummary(name: name, creationDate: bucket.creationDate)
@@ -31,21 +42,23 @@ final class AWSS3Gateway: S3Gateway {
     }
 
     func bucketRegion(profile: AWSProfile, region: String, bucket: String) async throws -> String? {
-        let client = try await client(profile: profile, region: region)
-        let output = try await client.getBucketLocation(input: GetBucketLocationInput(bucket: bucket))
+        let output = try await withClient(profile: profile, region: region) { client in
+            try await client.getBucketLocation(input: GetBucketLocationInput(bucket: bucket))
+        }
         return normalizedRegion(output.locationConstraint?.rawValue, fallback: region)
     }
 
     func listObjects(location: S3Location, continuationToken: String?, maxKeys: Int) async throws -> S3RawListPage {
         let profile = profile(named: location.profileName)
-        let client = try await client(profile: profile, region: location.regionOverride)
-        let output = try await client.listObjectsV2(input: ListObjectsV2Input(
-            bucket: location.bucket,
-            continuationToken: continuationToken,
-            delimiter: "/",
-            maxKeys: maxKeys,
-            prefix: location.prefix.isEmpty ? nil : location.prefix
-        ))
+        let output = try await withClient(profile: profile, region: location.regionOverride) { client in
+            try await client.listObjectsV2(input: ListObjectsV2Input(
+                bucket: location.bucket,
+                continuationToken: continuationToken,
+                delimiter: "/",
+                maxKeys: maxKeys,
+                prefix: location.prefix.isEmpty ? nil : location.prefix
+            ))
+        }
 
         return S3RawListPage(
             commonPrefixes: (output.commonPrefixes ?? []).compactMap(\.prefix),
@@ -65,8 +78,9 @@ final class AWSS3Gateway: S3Gateway {
 
     func headObject(location: S3Location, key: String) async throws -> S3ObjectMetadata {
         let profile = profile(named: location.profileName)
-        let client = try await client(profile: profile, region: location.regionOverride)
-        let output = try await client.headObject(input: HeadObjectInput(bucket: location.bucket, key: key))
+        let output = try await withClient(profile: profile, region: location.regionOverride) { client in
+            try await client.headObject(input: HeadObjectInput(bucket: location.bucket, key: key))
+        }
         return S3ObjectMetadata(
             contentLength: output.contentLength.map(Int64.init),
             contentType: output.contentType,
@@ -98,15 +112,16 @@ final class AWSS3Gateway: S3Gateway {
         try Task.checkCancellation()
 
         let profile = profile(named: request.location.profileName)
-        let client = try await client(profile: profile, region: request.location.regionOverride)
-        let output = try await client.putObject(input: PutObjectInput(
-            body: .from(fileHandle: fileHandle),
-            bucket: request.bucket,
-            contentLength: Int(request.contentLength),
-            contentType: request.contentType,
-            key: request.key,
-            storageClass: request.storageClass.sdkValue
-        ))
+        let output = try await withClient(profile: profile, region: request.location.regionOverride) { client in
+            try await client.putObject(input: PutObjectInput(
+                body: .from(fileHandle: fileHandle),
+                bucket: request.bucket,
+                contentLength: Int(request.contentLength),
+                contentType: request.contentType,
+                key: request.key,
+                storageClass: request.storageClass.sdkValue
+            ))
+        }
         try Task.checkCancellation()
 
         progress?(S3TransferProgress(
@@ -123,8 +138,9 @@ final class AWSS3Gateway: S3Gateway {
     func downloadObject(request: S3DownloadRequest, progress: S3TransferProgressHandler?) async throws -> S3DownloadResponse {
         try Task.checkCancellation()
         let profile = profile(named: request.location.profileName)
-        let client = try await client(profile: profile, region: request.location.regionOverride)
-        let output = try await client.getObject(input: GetObjectInput(bucket: request.bucket, key: request.key))
+        let output = try await withClient(profile: profile, region: request.location.regionOverride) { client in
+            try await client.getObject(input: GetObjectInput(bucket: request.bucket, key: request.key))
+        }
         try Task.checkCancellation()
 
         let totalBytes = output.contentLength.map(Int64.init)
@@ -161,7 +177,7 @@ final class AWSS3Gateway: S3Gateway {
 
     private func client(profile: AWSProfile, region: String?) async throws -> S3Client {
         if profile.hasSSOConfiguration {
-            return try await makeClient(profile: profile, region: region)
+            return try await ssoClient(profile: profile, region: region)
         }
 
         let key = ClientKey(profileName: profile.name, region: region)
@@ -179,20 +195,79 @@ final class AWSS3Gateway: S3Gateway {
         return created
     }
 
+    // SSO clients embed a static credential resolved from the SSO portal. Both the client and the
+    // underlying credential are cached and reused until the credential nears expiry, so browsing
+    // many objects no longer triggers a portal round-trip and a new client per request.
+    private func ssoClient(profile: AWSProfile, region: String?) async throws -> S3Client {
+        let key = ClientKey(profileName: profile.name, region: region)
+        lock.lock()
+        let cached = ssoClients[key]
+        lock.unlock()
+        if let cached, Self.isFresh(cached.expiration) {
+            return cached.client
+        }
+
+        let identity = try await ssoCredentialProvider.resolve(profileName: profile.name)
+        let resolver = try StaticAWSCredentialIdentityResolver(identity)
+        let config = try await S3Client.S3ClientConfiguration(
+            awsCredentialIdentityResolver: resolver,
+            region: region
+        )
+        let client = S3Client(config: config)
+
+        lock.lock()
+        ssoClients[key] = CachedSSOClient(client: client, expiration: identity.expiration)
+        lock.unlock()
+        return client
+    }
+
+    // Runs an S3 operation and, on an authorization failure for an SSO profile, drops the cached
+    // credential and client so the next request re-authenticates.
+    private func withClient<T>(
+        profile: AWSProfile,
+        region: String?,
+        _ body: (S3Client) async throws -> T
+    ) async throws -> T {
+        let client = try await client(profile: profile, region: region)
+        do {
+            return try await body(client)
+        } catch {
+            if profile.hasSSOConfiguration, Self.isAuthorizationError(error) {
+                invalidateSSO(profile: profile, region: region)
+            }
+            throw error
+        }
+    }
+
+    private func invalidateSSO(profile: AWSProfile, region: String?) {
+        ssoCredentialProvider.invalidate(profileName: profile.name)
+        let key = ClientKey(profileName: profile.name, region: region)
+        lock.lock()
+        ssoClients[key] = nil
+        lock.unlock()
+    }
+
+    private static func isFresh(_ expiration: Date?) -> Bool {
+        guard let expiration else { return false }
+        return expiration.timeIntervalSinceNow > credentialRefreshMargin
+    }
+
+    private static func isAuthorizationError(_ error: Error) -> Bool {
+        if error is CancellationError { return false }
+        let nsError = error as NSError
+        let text = "\(nsError.domain) \(nsError.localizedDescription) \(String(describing: error))".lowercased()
+        return text.contains("expiredtoken") ||
+            text.contains("invalidtoken") ||
+            text.contains("accessdenied") ||
+            text.contains("access denied") ||
+            text.contains("unauthorized") ||
+            text.contains("not authorized") ||
+            text.contains("forbidden")
+    }
+
     private func makeClient(profile: AWSProfile, region: String?) async throws -> S3Client {
         if let staticCredentials = staticCredentialIdentity(for: profile.name) {
             let resolver = try StaticAWSCredentialIdentityResolver(staticCredentials)
-            let config = try await S3Client.S3ClientConfiguration(
-                awsCredentialIdentityResolver: resolver,
-                region: region
-            )
-            return S3Client(config: config)
-        }
-
-        if profile.hasSSOConfiguration {
-            let identity = try await NoRefreshSSOCredentialProvider(profileStore: profileStore)
-                .resolve(profileName: profile.name)
-            let resolver = try StaticAWSCredentialIdentityResolver(identity)
             let config = try await S3Client.S3ClientConfiguration(
                 awsCredentialIdentityResolver: resolver,
                 region: region
@@ -313,6 +388,28 @@ private extension S3StorageClass {
 struct NoRefreshSSOCredentialProvider {
     typealias RoleCredentialLoader = (URLRequest) async throws -> (Data, URLResponse)
 
+    // Reference-type cache so resolved credentials persist across resolve() calls on the same
+    // provider instance (the struct is otherwise a value type).
+    final class CredentialCache {
+        private let lock = NSLock()
+        private var entries: [String: AWSCredentialIdentity] = [:]
+
+        func credential(for key: String) -> AWSCredentialIdentity? {
+            lock.lock(); defer { lock.unlock() }
+            return entries[key]
+        }
+
+        func store(_ identity: AWSCredentialIdentity, for key: String) {
+            lock.lock(); defer { lock.unlock() }
+            entries[key] = identity
+        }
+
+        func invalidate(_ key: String) {
+            lock.lock(); defer { lock.unlock() }
+            entries[key] = nil
+        }
+    }
+
     let profileStore: AWSProfileStore
     var now: () -> Date = Date.init
     var cacheDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
@@ -320,8 +417,21 @@ struct NoRefreshSSOCredentialProvider {
     var roleCredentialLoader: RoleCredentialLoader = { request in
         try await URLSession.shared.data(for: request)
     }
+    // Refresh a cached credential once it is within this margin of its expiry.
+    var refreshMargin: TimeInterval = 300
+    let credentialCache = CredentialCache()
+
+    func invalidate(profileName: String) {
+        credentialCache.invalidate(profileName)
+    }
 
     func resolve(profileName: String) async throws -> AWSCredentialIdentity {
+        if let cached = credentialCache.credential(for: profileName),
+           let expiration = cached.expiration,
+           expiration.timeIntervalSince(now()) > refreshMargin {
+            return cached
+        }
+
         let config = AWSINIParser.parse(data: try? Data(contentsOf: profileStore.configURL))
         let profileSection = profileName == "default" ? "default" : "profile \(profileName)"
         guard let profileValues = config[profileSection] else {
@@ -354,13 +464,15 @@ struct NoRefreshSSOCredentialProvider {
                 throw S3BrowserError.credentials("SSO did not return usable role credentials for profile \(profileName).")
             }
 
-            return AWSCredentialIdentity(
+            let identity = AWSCredentialIdentity(
                 accessKey: roleCredentials.accessKeyId,
                 secret: roleCredentials.secretAccessKey,
                 accountID: accountID,
                 expiration: roleCredentials.expiration.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) },
                 sessionToken: roleCredentials.sessionToken
             )
+            credentialCache.store(identity, for: profileName)
+            return identity
         } catch let error as S3BrowserError {
             throw error
         } catch {
