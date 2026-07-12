@@ -50,13 +50,27 @@ enum PathCopyFormatter {
     }
 
     private static func hfsPath(for url: URL) -> String {
-        var components = url.pathComponents.filter { $0 != "/" }
-        let volumeName = (try? url.resourceValues(forKeys: [.volumeNameKey]))?.volumeName
-        if let volumeName,
-           !volumeName.isEmpty {
-            components.insert(volumeName, at: 0)
+        let bootVolumeName = (try? url.resourceValues(forKeys: [.volumeNameKey]))?.volumeName
+        return hfsPath(pathComponents: url.pathComponents, bootVolumeName: bootVolumeName)
+    }
+
+    /// Builds a colon-separated HFS path from POSIX path components.
+    ///
+    /// Non-boot volumes are mounted under `/Volumes/<volumeName>`, so their path
+    /// components carry that prefix. The prefix must be treated as the volume
+    /// name rather than part of the file hierarchy, otherwise the volume name is
+    /// duplicated (e.g. `USB:Volumes:USB:file`). Boot-volume paths have no such
+    /// prefix and instead get the volume name prepended.
+    static func hfsPath(pathComponents: [String], bootVolumeName: String?) -> String {
+        let components = pathComponents.filter { $0 != "/" }
+        if components.count >= 2, components[0] == "Volumes" {
+            return ([components[1]] + components.dropFirst(2)).joined(separator: ":")
         }
-        return components.joined(separator: ":")
+        var result = components
+        if let bootVolumeName, !bootVolumeName.isEmpty {
+            result.insert(bootVolumeName, at: 0)
+        }
+        return result.joined(separator: ":")
     }
 
     private static func shellQuotedPath(_ path: String) -> String {
