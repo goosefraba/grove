@@ -34,6 +34,7 @@ struct FileItem: Identifiable, Hashable {
     let posixPermissions: UInt16
     let tags: [String]
     let tagMetadata: [FileTag]
+    var metadataUnavailable: Bool = false
 
     var isApplication: Bool {
         contentType?.conforms(to: .application) ?? false ||
@@ -202,7 +203,8 @@ struct FileItem: Identifiable, Hashable {
             contentType: .folder,
             posixPermissions: 0,
             tags: [],
-            tagMetadata: []
+            tagMetadata: [],
+            metadataUnavailable: true
         )
     }
 
@@ -268,14 +270,14 @@ struct FileItem: Identifiable, Hashable {
     }
 
     var formattedSize: String {
-        if isDirectory && !isPackage {
+        if metadataUnavailable || (isDirectory && !isPackage) {
             return "--"
         }
         return ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
     }
 
     var formattedDateModified: String {
-        FileItem.dateFormatter.string(from: dateModified)
+        metadataUnavailable ? "--" : FileItem.dateFormatter.string(from: dateModified)
     }
 
     static func sort(_ items: inout [FileItem], key: String, ascending: Bool) {
