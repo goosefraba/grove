@@ -222,18 +222,26 @@ final class FileOperationService {
 
     func copyWithProgress(_ urls: [URL], to destination: URL, progress: @escaping (Double, String) -> Void, cancelled: @escaping () -> Bool) throws -> [URL] {
         var records: [FileTransferRecord] = []
-        for (index, url) in urls.enumerated() {
+        let totalBytes = byteSize(of: urls)
+        var completedBytes: Int64 = 0
+        for url in urls {
             if cancelled() {
                 throw FileOperationError.cancelled(records: records)
             }
-            let destURL = uniqueDestination(for: url, in: destination)
-            progress(Double(index) / Double(urls.count), url.lastPathComponent)
+            let sourceBytes = byteSize(of: url)
+            progress(fraction(completedBytes, totalBytes), url.lastPathComponent)
+            let tracker = CopyfileProgress(total: totalBytes, base: completedBytes, isCancelled: cancelled) {
+                progress($0, url.lastPathComponent)
+            }
             do {
-                try fileManager.copyItem(at: url, to: destURL)
+                let destURL = try copyItemWithProgress(url, toUniqueIn: destination, tracker: tracker)
+                records.append(FileTransferRecord(sourceURL: url, destinationURL: destURL, undoBehavior: .trashDestination))
+            } catch is CancellationSentinel {
+                throw FileOperationError.cancelled(records: records)
             } catch {
                 throw FileOperationError.partialFailure(records: records, underlying: error)
             }
-            records.append(FileTransferRecord(sourceURL: url, destinationURL: destURL, undoBehavior: .trashDestination))
+            completedBytes += sourceBytes
         }
         progress(1.0, "")
         return records.map(\.destinationURL)
@@ -241,18 +249,34 @@ final class FileOperationService {
 
     func moveWithProgress(_ urls: [URL], to destination: URL, progress: @escaping (Double, String) -> Void, cancelled: @escaping () -> Bool) throws -> [URL] {
         var records: [FileTransferRecord] = []
-        for (index, url) in urls.enumerated() {
+        let totalBytes = byteSize(of: urls)
+        var completedBytes: Int64 = 0
+        for url in urls {
             if cancelled() {
                 throw FileOperationError.cancelled(records: records)
             }
-            let destURL = uniqueDestination(for: url, in: destination)
-            progress(Double(index) / Double(urls.count), url.lastPathComponent)
+            let sourceBytes = byteSize(of: url)
+            progress(fraction(completedBytes, totalBytes), url.lastPathComponent)
             do {
-                try fileManager.moveItem(at: url, to: destURL)
+                let destURL: URL
+                if onSameVolume(url, destination) {
+                    // Same volume: moveItem is an instant rename, no byte progress needed.
+                    destURL = try transfer(url, toUniqueIn: destination, operation: .move)
+                } else {
+                    // Cross volume move is a copy + delete; stream byte progress then remove the source.
+                    let tracker = CopyfileProgress(total: totalBytes, base: completedBytes, isCancelled: cancelled) {
+                        progress($0, url.lastPathComponent)
+                    }
+                    destURL = try copyItemWithProgress(url, toUniqueIn: destination, tracker: tracker)
+                    try fileManager.removeItem(at: url)
+                }
+                records.append(FileTransferRecord(sourceURL: url, destinationURL: destURL, undoBehavior: .moveBackToSource))
+            } catch is CancellationSentinel {
+                throw FileOperationError.cancelled(records: records)
             } catch {
                 throw FileOperationError.partialFailure(records: records, underlying: error)
             }
-            records.append(FileTransferRecord(sourceURL: url, destinationURL: destURL, undoBehavior: .moveBackToSource))
+            completedBytes += sourceBytes
         }
         progress(1.0, "")
         return records.map(\.destinationURL)
