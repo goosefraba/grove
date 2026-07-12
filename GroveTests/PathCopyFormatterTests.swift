@@ -84,4 +84,67 @@ final class PathCopyFormatterTests: XCTestCase {
         XCTAssertEqual(result, home.path.replacingOccurrences(of: "/", with: "\\"))
         XCTAssertFalse(result.contains("/"))
     }
+
+    // MARK: - Boot-volume paths, all six format modes
+
+    func testUnixReturnsRawPOSIXPath() {
+        let url = URL(fileURLWithPath: "/Users/me/Documents/report.txt")
+        XCTAssertEqual(PathCopyFormatter.string(for: url, format: .unix), "/Users/me/Documents/report.txt")
+    }
+
+    func testWindowsReplacesSeparatorsWithBackslashes() {
+        let url = URL(fileURLWithPath: "/Users/me/Documents/report.txt")
+        XCTAssertEqual(PathCopyFormatter.string(for: url, format: .windows), "\\Users\\me\\Documents\\report.txt")
+    }
+
+    func testTerminalSingleQuotesAndEscapesEmbeddedQuotes() {
+        let url = URL(fileURLWithPath: "/Users/me/my file's.txt")
+        // Single-quote the path and render embedded ' as '\'' so it is copy-paste-ready in a shell.
+        XCTAssertEqual(PathCopyFormatter.string(for: url, format: .terminal), "'/Users/me/my file'\\''s.txt'")
+    }
+
+    func testURLReturnsFileScheme() {
+        let url = URL(fileURLWithPath: "/Users/me/report.txt")
+        let formatted = PathCopyFormatter.string(for: url, format: .url)
+        XCTAssertEqual(formatted, url.absoluteString)
+        XCTAssertTrue(formatted.hasPrefix("file://"))
+    }
+
+    func testNameReturnsLastComponent() {
+        let url = URL(fileURLWithPath: "/Users/me/Documents/report.txt")
+        XCTAssertEqual(PathCopyFormatter.string(for: url, format: .name), "report.txt")
+    }
+
+    func testHFSUsesVolumeNamePrefixAndColonSeparatorsOnBootVolume() throws {
+        let dir = FileManager.default.temporaryDirectory
+        let volumeName = try XCTUnwrap((try dir.resourceValues(forKeys: [.volumeNameKey])).volumeName)
+        let hfs = PathCopyFormatter.string(for: dir, format: .hfs)
+
+        XCTAssertFalse(hfs.contains("/"), "HFS path must not contain POSIX separators: \(hfs)")
+        XCTAssertTrue(hfs.hasPrefix(volumeName + ":"), "expected \(hfs) to start with \(volumeName):")
+    }
+
+    // MARK: - External /Volumes paths
+
+    func testExternalVolumeUnixWindowsAndName() {
+        let url = URL(fileURLWithPath: "/Volumes/External Drive/Projects/build.sh")
+        XCTAssertEqual(PathCopyFormatter.string(for: url, format: .unix), "/Volumes/External Drive/Projects/build.sh")
+        XCTAssertEqual(PathCopyFormatter.string(for: url, format: .windows), "\\Volumes\\External Drive\\Projects\\build.sh")
+        XCTAssertEqual(PathCopyFormatter.string(for: url, format: .name), "build.sh")
+    }
+
+    func testExternalVolumeTerminalQuotesSpaces() {
+        let url = URL(fileURLWithPath: "/Volumes/External Drive/Projects/build.sh")
+        XCTAssertEqual(PathCopyFormatter.string(for: url, format: .terminal), "'/Volumes/External Drive/Projects/build.sh'")
+    }
+
+    func testExternalVolumeHFSJoinsComponentsWithColon() {
+        // Volume-name lookup fails for a non-mounted /Volumes path, so components are colon-joined
+        // with no volume prefix — and never contain POSIX separators.
+        let url = URL(fileURLWithPath: "/Volumes/Ghost/dir/file.txt")
+        let hfs = PathCopyFormatter.string(for: url, format: .hfs)
+        XCTAssertFalse(hfs.contains("/"))
+        XCTAssertTrue(hfs.contains(":"))
+        XCTAssertTrue(hfs.hasSuffix("file.txt"))
+    }
 }
