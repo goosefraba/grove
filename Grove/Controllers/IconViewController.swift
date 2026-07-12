@@ -377,6 +377,9 @@ final class IconCollectionViewItem: NSCollectionViewItem {
     override func viewDidLoad() {
         super.viewDidLoad()
 
+        // Enable the layer up front so selection styling applied before first layout isn't dropped.
+        view.wantsLayer = true
+
         iconImageView.imageScaling = .scaleProportionallyUpOrDown
         iconImageView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(iconImageView)
@@ -409,18 +412,20 @@ final class IconCollectionViewItem: NSCollectionViewItem {
     }
 
     override var isSelected: Bool {
-        didSet {
-            if isSelected {
-                view.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.2).cgColor
-                view.layer?.cornerRadius = 6
-            } else {
-                view.layer?.backgroundColor = nil
-            }
-        }
+        didSet { updateSelectionAppearance() }
     }
 
-    override func viewDidLayout() {
-        super.viewDidLayout()
-        view.wantsLayer = true
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        updateSelectionAppearance()
+    }
+
+    private func updateSelectionAppearance() {
+        if isSelected {
+            view.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.2).cgColor
+            view.layer?.cornerRadius = 6
+        } else {
+            view.layer?.backgroundColor = nil
+        }
     }
 }
