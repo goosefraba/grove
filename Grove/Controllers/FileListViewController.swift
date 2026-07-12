@@ -8,6 +8,13 @@ private final class FileListTableView: NSTableView {
     var onCopyFiles: (() -> Void)?
     var onCutFiles: (() -> Void)?
     var onPasteFiles: (() -> Void)?
+    var onBecomeFirstResponder: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let didBecome = super.becomeFirstResponder()
+        if didBecome { onBecomeFirstResponder?() }
+        return didBecome
+    }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.isRenameShortcut {
@@ -341,6 +348,15 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
     func clearToolbarSearch() {
         clearSearch()
+    }
+
+    var onBecomeFirstResponder: (() -> Void)? {
+        get { tableView.onBecomeFirstResponder }
+        set { tableView.onBecomeFirstResponder = newValue }
+    }
+
+    func focusFileList() {
+        view.window?.makeFirstResponder(tableView)
     }
 
     func applyFilter() {

@@ -5,7 +5,7 @@ final class DualPaneViewController: NSViewController {
     private let splitView = NSSplitView()
     let leftPane = FileListViewController()
     let rightPane = FileListViewController()
-    private var activePane: FileListViewController
+    private(set) var activePane: FileListViewController
 
     private let leftContainer = NSView()
     private let rightContainer = NSView()
@@ -80,6 +80,15 @@ final class DualPaneViewController: NSViewController {
 
         leftPane.delegate = self
         rightPane.delegate = self
+
+        leftPane.onBecomeFirstResponder = { [weak self] in
+            guard let self else { return }
+            self.setActivePane(self.leftPane)
+        }
+        rightPane.onBecomeFirstResponder = { [weak self] in
+            guard let self else { return }
+            self.setActivePane(self.rightPane)
+        }
     }
 
     func loadDirectory(_ url: URL) {
@@ -97,8 +106,8 @@ final class DualPaneViewController: NSViewController {
     }
 
     func switchActivePane() {
-        setActivePane((activePane === leftPane) ? rightPane : leftPane)
-        view.window?.makeFirstResponder(activePane.view)
+        let target = (activePane === leftPane) ? rightPane : leftPane
+        target.focusFileList()
     }
 
     private func setActivePane(_ pane: FileListViewController) {
@@ -122,12 +131,14 @@ final class DualPaneViewController: NSViewController {
     }
 
     override func keyDown(with event: NSEvent) {
-        switch event.keyCode {
-        case 48: // Tab
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // Cmd+Option+Left / Cmd+Option+Right toggle the active pane. Tab is left
+        // to the focused table view for intra-pane keyboard navigation.
+        if mods == [.command, .option], event.keyCode == 123 || event.keyCode == 124 {
             switchActivePane()
-        default:
-            super.keyDown(with: event)
+            return
         }
+        super.keyDown(with: event)
     }
 }
 
@@ -139,11 +150,6 @@ extension DualPaneViewController: FileListViewControllerDelegate {
     }
 
     func fileListDidSelect(items: [FileItem]) {
-        if leftPane.selectedItems == items, rightPane.selectedItems != items {
-            setActivePane(leftPane)
-        } else if rightPane.selectedItems == items, leftPane.selectedItems != items {
-            setActivePane(rightPane)
-        }
         selectionDelegate?.fileListDidSelect(items: items)
     }
 }

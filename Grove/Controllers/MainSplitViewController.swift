@@ -140,7 +140,7 @@ final class MainSplitViewController: NSSplitViewController {
 
     var showsHiddenFiles: Bool {
         if isDualPaneActive {
-            return dualPaneVC?.leftPane.showHiddenFiles ?? false
+            return dualPaneVC?.activePane.showHiddenFiles ?? false
         }
         return currentContentVC?.showHiddenFiles ?? false
     }
@@ -148,7 +148,7 @@ final class MainSplitViewController: NSSplitViewController {
     func setShowsHiddenFiles(_ visible: Bool) {
         guard showsHiddenFiles != visible else { return }
         if isDualPaneActive {
-            dualPaneVC?.setShowsHiddenFiles(visible)
+            dualPaneVC?.activePane.setShowsHiddenFiles(visible)
         } else {
             currentContentVC?.setShowsHiddenFiles(visible)
         }
