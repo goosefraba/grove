@@ -379,34 +379,26 @@ final class FileOperationService {
     }
 
     private func performReplacingTransfer(_ sourceURL: URL, to destinationURL: URL, operation: TransferOperation) throws {
-        let backupURL = replacementBackupURL(for: destinationURL)
-
-        try fileManager.moveItem(at: destinationURL, to: backupURL)
-        do {
-            try performTransfer(sourceURL, to: destinationURL, operation: operation)
-        } catch {
-            if fileManager.fileExists(atPath: destinationURL.path) {
-                try? fileManager.removeItem(at: destinationURL)
-            }
-            try? fileManager.moveItem(at: backupURL, to: destinationURL)
-            throw error
+        // Same-volume moves can be replaced atomically without staging a copy.
+        if operation == .move, onSameVolume(sourceURL, destinationURL) {
+            try fileManager.replaceItem(at: destinationURL, withItemAt: sourceURL, backupItemName: nil, options: [], resultingItemURL: nil)
+            return
         }
 
-        do {
-            try fileManager.removeItem(at: backupURL)
-        } catch {
-            Self.logger.error("Unable to remove replacement backup after successful transfer: \(backupURL.path, privacy: .public)")
-        }
-    }
+        // Otherwise stage the incoming item in a system-managed replacement directory (same volume as
+        // the destination) and swap it in atomically. FileManager.replaceItem restores the original on
+        // failure and never leaves a user-visible backup file stranded on a crash.
+        let stagingDir = try fileManager.url(
+            for: .itemReplacementDirectory,
+            in: .userDomainMask,
+            appropriateFor: destinationURL,
+            create: true
+        )
+        defer { try? fileManager.removeItem(at: stagingDir) }
 
-    private func replacementBackupURL(for destinationURL: URL) -> URL {
-        let directory = destinationURL.deletingLastPathComponent()
-        let base = ".\(destinationURL.lastPathComponent).grove-replace"
-        var backupURL = directory.appendingPathComponent("\(base)-\(UUID().uuidString)")
-        while fileManager.fileExists(atPath: backupURL.path) {
-            backupURL = directory.appendingPathComponent("\(base)-\(UUID().uuidString)")
-        }
-        return backupURL
+        let stagedURL = stagingDir.appendingPathComponent(destinationURL.lastPathComponent)
+        try performTransfer(sourceURL, to: stagedURL, operation: operation)
+        try fileManager.replaceItem(at: destinationURL, withItemAt: stagedURL, backupItemName: nil, options: [], resultingItemURL: nil)
     }
 
     private func mergeDirectory(
