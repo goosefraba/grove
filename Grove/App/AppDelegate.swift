@@ -39,6 +39,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         saveWindowStates()
     }
 
+    func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
+        true
+    }
+
     // MARK: - Window Management
 
     @objc func newWindow(_ sender: Any?) {
