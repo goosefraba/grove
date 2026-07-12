@@ -181,10 +181,11 @@ final class MainSplitViewController: NSSplitViewController {
     }
 
     func clearToolbarSearch() {
-        if activeFileListViewController == nil {
-            fileListVC.clearToolbarSearch()
+        if isDualPaneActive {
+            dualPaneVC?.activePane.clearToolbarSearch()
+        } else {
+            currentContentVC?.clearToolbarSearch()
         }
-        currentContentVC?.clearToolbarSearch()
     }
 
     func createNewFolder() {
