@@ -133,7 +133,7 @@ struct InspectorView: View {
 
                 Divider()
 
-                DetailRow(label: "Total Size", value: formattedTotalSize)
+                DetailRow(label: totalSizeLabel, value: formattedTotalSize)
                 DetailRow(label: "Types", value: typeSummary)
 
                 Spacer()
@@ -160,6 +160,11 @@ struct InspectorView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    // Directory sizes aren't summed (FileItem.size is 0 for folders), so flag the exclusion.
+    private var totalSizeLabel: String {
+        items.contains { $0.isContainer } ? "Total Size (files only)" : "Total Size"
     }
 
     private var formattedTotalSize: String {
