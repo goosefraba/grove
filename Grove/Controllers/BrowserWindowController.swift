@@ -538,34 +538,6 @@ extension BrowserWindowController: BrowserWindowFileDropDelegate {
         }
     }
 
-    private func registerUndoMove(originalURLs: [URL], movedURLs: [URL]) {
-        guard let undoManager = window?.undoManager else { return }
-        undoManager.registerUndo(withTarget: self) { target in
-            do {
-                for (movedURL, originalURL) in zip(movedURLs, originalURLs) {
-                    _ = try FileOperationService.shared.moveResolvingConflicts([movedURL], to: originalURL.deletingLastPathComponent()) { _ in
-                        .keepBoth
-                    }
-                }
-            } catch {
-                target.showError(error)
-            }
-        }
-        undoManager.setActionName("Move")
-    }
-
-    private func registerUndoCopy(copiedURLs: [URL]) {
-        guard let undoManager = window?.undoManager else { return }
-        undoManager.registerUndo(withTarget: self) { target in
-            do {
-                _ = try FileOperationService.shared.moveToTrash(copiedURLs)
-            } catch {
-                target.showError(error)
-            }
-        }
-        undoManager.setActionName("Copy")
-    }
-
     private func registerUndoTransfer(records: [FileOperationService.FileTransferRecord], actionName: String) {
         let undoableRecords = records.filter(\.isUndoable)
         guard !undoableRecords.isEmpty, let undoManager = window?.undoManager else { return }
