@@ -60,6 +60,10 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
         collectionView.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
         collectionView.setDraggingSourceOperationMask(.copy, forLocal: false)
 
+        let contextMenu = FileContextMenuBuilder.makeMenu()
+        contextMenu.delegate = self
+        collectionView.menu = contextMenu
+
         scrollView.documentView = collectionView
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
@@ -274,6 +278,12 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
         super.keyDown(with: event)
     }
 
+    // MARK: - File operation responders
+
+    @objc func copy(_ sender: Any?) { copySelectedFiles() }
+    @objc func cut(_ sender: Any?) { cutSelectedFiles() }
+    @objc func paste(_ sender: Any?) { pasteFiles() }
+
     // MARK: - Drag and Drop
 
     func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> (any NSPasteboardWriting)? {
@@ -360,6 +370,26 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
         }
         let alert = NSAlert(error: error)
         alert.beginSheetModal(for: window, completionHandler: nil)
+    }
+}
+
+// MARK: - Context menu
+
+extension IconViewController: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard let event = NSApp.currentEvent else { return }
+        let point = collectionView.convert(event.locationInWindow, from: nil)
+        guard let indexPath = collectionView.indexPathForItem(at: point),
+              !collectionView.selectionIndexPaths.contains(indexPath) else { return }
+        collectionView.selectionIndexPaths = [indexPath]
+        delegate?.fileListDidSelect(items: selectedItems)
+        updateStatusBar()
+    }
+}
+
+extension IconViewController: NSMenuItemValidation {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        validateFileOperationMenuItem(menuItem)
     }
 }
 

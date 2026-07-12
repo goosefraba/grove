@@ -47,9 +47,19 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
         browser.action = #selector(browserSingleClick(_:))
         browser.doubleAction = #selector(browserDoubleClick(_:))
 
+        let contextMenu = FileContextMenuBuilder.makeMenu()
+        contextMenu.delegate = self
+        browser.menu = contextMenu
+
         browser.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(browser)
     }
+
+    // MARK: - File operation responders
+
+    @objc func copy(_ sender: Any?) { copySelectedFiles() }
+    @objc func cut(_ sender: Any?) { cutSelectedFiles() }
+    @objc func paste(_ sender: Any?) { pasteFiles() }
 
     private func setupStatusBar() {
         GroveUI.configureFooterStatusLabel(statusBar)
@@ -364,6 +374,32 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
             browser?.setNeedsDisplay(browser?.frame(ofRow: row, inColumn: column) ?? .zero)
         }
         browserCell.isLeaf = !(item.isDirectory && !item.isPackage)
+    }
+}
+
+// MARK: - Context menu
+
+extension ColumnViewController: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard let event = NSApp.currentEvent, browser.lastColumn >= 0 else { return }
+        for column in 0...browser.lastColumn {
+            guard let matrix = browser.matrix(inColumn: column) else { continue }
+            let point = matrix.convert(event.locationInWindow, from: nil)
+            guard matrix.bounds.contains(point) else { continue }
+            var row = -1
+            var col = -1
+            if matrix.getRow(&row, column: &col, for: point), row >= 0 {
+                browser.selectRow(row, inColumn: column)
+                browserSingleClick(nil)
+            }
+            return
+        }
+    }
+}
+
+extension ColumnViewController: NSMenuItemValidation {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        validateFileOperationMenuItem(menuItem)
     }
 }
 

@@ -149,27 +149,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     @objc func copyFiles(_ sender: Any?) {
-        currentFileListVC?.copySelectedFiles()
+        currentContentVC?.copySelectedFiles()
     }
 
     @objc func cutFiles(_ sender: Any?) {
-        currentFileListVC?.cutSelectedFiles()
+        currentContentVC?.cutSelectedFiles()
     }
 
     @objc func pasteFiles(_ sender: Any?) {
-        currentFileListVC?.pasteFiles()
+        currentContentVC?.pasteFiles()
     }
 
     @objc func deleteFiles(_ sender: Any?) {
-        currentFileListVC?.deleteSelectedFiles()
+        currentContentVC?.deleteSelectedFiles()
     }
 
     @objc func duplicateFiles(_ sender: Any?) {
-        currentFileListVC?.duplicateSelectedFiles()
+        currentContentVC?.duplicateSelectedFiles()
     }
 
     @objc func batchRenameFiles(_ sender: Any?) {
-        currentFileListVC?.batchRenameSelectedFiles()
+        currentContentVC?.batchRenameSelectedFiles()
+    }
+
+    @objc func renameFile(_ sender: Any?) {
+        currentContentVC?.renameSelectedItem()
     }
 
     @objc func createNewFolder(_ sender: Any?) {
@@ -177,7 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     @objc func openFile(_ sender: Any?) {
-        currentFileListVC?.openSelectedFile()
+        currentContentVC?.openSelectedFile()
     }
 
     @objc func toggleHiddenFiles(_ sender: Any?) {
@@ -218,12 +222,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         switch menuItem.action {
         case #selector(copyFiles(_:)),
              #selector(cutFiles(_:)),
-             #selector(pasteFiles(_:)),
              #selector(deleteFiles(_:)),
              #selector(duplicateFiles(_:)),
-             #selector(batchRenameFiles(_:)),
              #selector(openFile(_:)):
-            return currentFileListVC != nil
+            return hasLocalSelection
+        case #selector(renameFile(_:)):
+            return hasLocalSelection && currentContentVC?.selectedItems.count == 1
+        case #selector(batchRenameFiles(_:)):
+            return hasLocalSelection && (currentContentVC?.selectedItems.count ?? 0) > 1
+        case #selector(pasteFiles(_:)):
+            return currentContentVC != nil
+                && currentSplitVC?.currentLocation.isLocal == true
+                && FileOperationClipboard.read() != nil
         case #selector(createNewFolder(_:)):
             return currentSplitVC?.currentCapabilities.contains(.createFolder) ?? false
         case #selector(goEnclosingFolder(_:)):
@@ -252,8 +262,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         return wc.contentViewController as? MainSplitViewController
     }
 
-    private var currentFileListVC: FileListViewController? {
-        currentSplitVC?.activeFileListViewController
+    private var currentContentVC: (NSViewController & FileViewControllerProtocol)? {
+        currentSplitVC?.activeContentViewController
+    }
+
+    /// True when the active view is a local file view with at least one selected item.
+    private var hasLocalSelection: Bool {
+        guard let vc = currentContentVC,
+              currentSplitVC?.currentLocation.isLocal == true else { return false }
+        return !vc.selectedItems.isEmpty
     }
 
     // MARK: - Main Menu

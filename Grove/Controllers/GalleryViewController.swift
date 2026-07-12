@@ -78,6 +78,11 @@ final class GalleryViewController: NSViewController, FileViewControllerProtocol,
 
         filmstripCollectionView.register(FilmstripItem.self, forItemWithIdentifier: Self.filmstripItemIdentifier)
 
+        let contextMenu = FileContextMenuBuilder.makeMenu()
+        contextMenu.delegate = self
+        filmstripCollectionView.menu = contextMenu
+        previewContainer.menu = contextMenu
+
         filmstripScrollView.documentView = filmstripCollectionView
         filmstripScrollView.hasHorizontalScroller = true
         filmstripScrollView.hasVerticalScroller = false
@@ -341,6 +346,12 @@ final class GalleryViewController: NSViewController, FileViewControllerProtocol,
         }
     }
 
+    // MARK: - File operation responders
+
+    @objc func copy(_ sender: Any?) { copySelectedFiles() }
+    @objc func cut(_ sender: Any?) { cutSelectedFiles() }
+    @objc func paste(_ sender: Any?) { pasteFiles() }
+
     // MARK: - NSCollectionViewDataSource
 
     func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
@@ -361,6 +372,25 @@ final class GalleryViewController: NSViewController, FileViewControllerProtocol,
     func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
         guard let indexPath = indexPaths.first else { return }
         selectPreviewItem(at: indexPath.item)
+    }
+}
+
+// MARK: - Context menu
+
+extension GalleryViewController: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard let event = NSApp.currentEvent else { return }
+        let point = filmstripCollectionView.convert(event.locationInWindow, from: nil)
+        guard let indexPath = filmstripCollectionView.indexPathForItem(at: point),
+              indexPath.item != currentPreviewIndex else { return }
+        filmstripCollectionView.selectionIndexPaths = [indexPath]
+        selectPreviewItem(at: indexPath.item)
+    }
+}
+
+extension GalleryViewController: NSMenuItemValidation {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        validateFileOperationMenuItem(menuItem)
     }
 }
 

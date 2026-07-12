@@ -172,6 +172,13 @@ final class MainSplitViewController: NSSplitViewController {
         return currentContentVC as? FileListViewController
     }
 
+    /// The content view controller that should receive file operations (any view mode).
+    /// Nil in dual-pane mode, where each pane handles its own operations.
+    var activeContentViewController: (NSViewController & FileViewControllerProtocol)? {
+        guard !isDualPaneActive else { return nil }
+        return currentContentVC
+    }
+
     func setToolbarFilterText(_ text: String) {
         currentContentVC?.setToolbarFilterText(text)
     }

@@ -24,6 +24,59 @@ protocol FileViewControllerProtocol: AnyObject {
     func setToolbarFilterText(_ text: String)
     func performToolbarSearch(_ query: String)
     func clearToolbarSearch()
+
+    // File operations — available in every view, not just list view.
+    func copySelectedFiles()
+    func cutSelectedFiles()
+    func pasteFiles()
+    func deleteSelectedFiles()
+    func duplicateSelectedFiles()
+    func batchRenameSelectedFiles()
+    func renameSelectedItem()
+    func openSelectedFile()
+}
+
+/// Shared file clipboard so copy/cut/paste interoperate across all view modes and match
+/// the pasteboard format the list view already uses.
+enum FileOperationClipboard {
+    static let pasteboardType = NSPasteboard.PasteboardType("com.grove.file-operation")
+
+    static func write(_ urls: [URL], isCut: Bool) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.writeObjects(urls as [NSURL])
+        pb.setString(isCut ? "cut" : "copy", forType: pasteboardType)
+    }
+
+    static func read() -> (urls: [URL], isCut: Bool)? {
+        let pb = NSPasteboard.general
+        guard let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+              !urls.isEmpty else { return nil }
+        return (urls, pb.string(forType: pasteboardType) == "cut")
+    }
+}
+
+/// Builds the shared file context menu used by icon, column, and gallery views. Items are
+/// nil-targeted so they travel the responder chain to AppDelegate, which routes and validates them.
+enum FileContextMenuBuilder {
+    static func makeMenu() -> NSMenu {
+        let menu = NSMenu()
+        // Copy/Cut/Paste use the standard responder selectors so the active view's own
+        // handlers (and validation) fire; the rest route to AppDelegate.
+        let items: [(String, Selector)] = [
+            ("Copy", #selector(NSText.copy(_:))),
+            ("Cut", #selector(NSText.cut(_:))),
+            ("Paste", #selector(NSText.paste(_:))),
+            ("Duplicate", Selector(("duplicateFiles:"))),
+            ("Rename", Selector(("renameFile:"))),
+        ]
+        for (title, action) in items {
+            menu.addItem(NSMenuItem(title: title, action: action, keyEquivalent: ""))
+        }
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Move to Trash", action: Selector(("deleteFiles:")), keyEquivalent: ""))
+        return menu
+    }
 }
 
 enum GroveUI {
@@ -176,6 +229,118 @@ extension FileViewControllerProtocol {
     func setToolbarFilterText(_ text: String) {}
     func performToolbarSearch(_ query: String) {}
     func clearToolbarSearch() {}
+}
+
+// Default file operations for view controllers that don't provide their own (icon, column,
+// gallery). The list view keeps its richer implementations (progress sheets, undo).
+extension FileViewControllerProtocol where Self: NSViewController {
+    func copySelectedFiles() {
+        let urls = selectedItems.map(\.url)
+        guard !urls.isEmpty else { return }
+        FileOperationClipboard.write(urls, isCut: false)
+    }
+
+    func cutSelectedFiles() {
+        let urls = selectedItems.map(\.url)
+        guard !urls.isEmpty else { return }
+        FileOperationClipboard.write(urls, isCut: true)
+    }
+
+    func pasteFiles() {
+        guard let (urls, isCut) = FileOperationClipboard.read() else { return }
+        do {
+            if isCut {
+                _ = try FileOperationService.shared.move(urls, to: currentURL)
+                NSPasteboard.general.clearContents()
+            } else {
+                _ = try FileOperationService.shared.copy(urls, to: currentURL)
+            }
+            loadDirectory(currentURL)
+        } catch {
+            presentFileOperationError(error)
+        }
+    }
+
+    func deleteSelectedFiles() {
+        let urls = selectedItems.map(\.url)
+        guard !urls.isEmpty, let window = view.window else { return }
+
+        let alert = NSAlert()
+        alert.messageText = urls.count == 1
+            ? "Are you sure you want to move \"\(urls[0].lastPathComponent)\" to the Trash?"
+            : "Are you sure you want to move \(urls.count) items to the Trash?"
+        alert.informativeText = "You can restore items from the Trash."
+        alert.addButton(withTitle: "Move to Trash")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            do {
+                _ = try FileOperationService.shared.moveToTrash(urls)
+                self?.loadDirectory(self?.currentURL ?? urls[0].deletingLastPathComponent())
+            } catch {
+                self?.presentFileOperationError(error)
+            }
+        }
+    }
+
+    func duplicateSelectedFiles() {
+        let urls = selectedItems.map(\.url)
+        guard !urls.isEmpty else { return }
+        do {
+            for url in urls {
+                _ = try FileOperationService.shared.duplicate(url)
+            }
+            loadDirectory(currentURL)
+        } catch {
+            presentFileOperationError(error)
+        }
+    }
+
+    func batchRenameSelectedFiles() {
+        let urls = selectedItems.map(\.url)
+        guard urls.count > 1 else { return }
+        // ponytail: no delegate — the directory watcher refreshes the view after renames.
+        presentAsSheet(BatchRenameViewController(urls: urls))
+    }
+
+    func renameSelectedItem() {
+        guard selectedItems.count == 1, let item = selectedItems.first else { return }
+        FileRenameHelper.presentRenameSheet(for: item, from: self) { [weak self] _ in
+            guard let self else { return }
+            self.loadDirectory(self.currentURL)
+        }
+    }
+
+    func openSelectedFile() {
+        guard let item = selectedItems.first else { return }
+        if item.isDirectory && !item.isPackage {
+            delegate?.fileListDidNavigate(to: item.url.resolvingSymlinksInPath())
+        } else {
+            FileOperationService.shared.openFile(item.url)
+        }
+    }
+
+    func presentFileOperationError(_ error: Error) {
+        let alert = NSAlert(error: error)
+        if let window = view.window {
+            alert.beginSheetModal(for: window, completionHandler: nil)
+        } else {
+            alert.runModal()
+        }
+    }
+
+    /// Enablement for the standard copy/cut/paste menu items handled by this view.
+    func validateFileOperationMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(NSText.copy(_:)), #selector(NSText.cut(_:)):
+            return !selectedItems.isEmpty
+        case #selector(NSText.paste(_:)):
+            return FileOperationClipboard.read() != nil
+        default:
+            return true
+        }
+    }
 }
 
 enum FileRenameHelper {
