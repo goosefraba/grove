@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import UniformTypeIdentifiers
 
 final class PreviewPaneController: NSViewController {
@@ -13,6 +14,12 @@ final class PreviewPaneController: NSViewController {
     private let fallbackSizeLabel = NSTextField(labelWithString: "")
 
     private var currentItem: FileItem?
+
+    /// Bumped on every selection change so stale background loads can discard their results.
+    private var loadGeneration = 0
+
+    /// Cap decoded image dimensions to avoid inflating multi-GB rasters into memory.
+    private let maxImagePixelSize = 4096
 
     override func loadView() {
         view = NSView()
@@ -119,6 +126,7 @@ final class PreviewPaneController: NSViewController {
 
     func updateSelection(_ item: FileItem?) {
         currentItem = item
+        loadGeneration += 1
         guard let item = item else {
             showFallback(nil)
             return
@@ -170,36 +178,57 @@ final class PreviewPaneController: NSViewController {
         showFallback(item)
     }
 
+    /// Runs `work` on a background queue, then delivers its result on the main queue only if
+    /// the selection hasn't changed since this load started. `nil` result falls back.
+    private func loadInBackground<T>(_ item: FileItem,
+                                     work: @escaping () -> T?,
+                                     present: @escaping (T) -> Void) {
+        let generation = loadGeneration
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = work()
+            DispatchQueue.main.async {
+                guard let self = self, self.loadGeneration == generation else { return }
+                if let result = result {
+                    present(result)
+                } else {
+                    self.showFallback(item)
+                }
+            }
+        }
+    }
+
     private func showText(_ item: FileItem) {
         hideAll()
         scrollView.isHidden = false
 
-        // Limit reading to 1 MB
-        guard let data = try? Data(contentsOf: item.url, options: [.mappedIfSafe]),
-              data.count < 1_048_576,
-              let content = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .ascii) else {
-            showFallback(item)
-            return
-        }
-
-        textView.string = content
-        textView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        loadInBackground(item, work: {
+            // Limit reading to 1 MB
+            guard let data = try? Data(contentsOf: item.url, options: [.mappedIfSafe]),
+                  data.count < 1_048_576 else {
+                return nil
+            }
+            return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .ascii)
+        }, present: { [weak self] content in
+            self?.textView.string = content
+            self?.textView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        })
     }
 
     private func showMarkdown(_ item: FileItem) {
         hideAll()
         scrollView.isHidden = false
 
-        guard let data = try? Data(contentsOf: item.url, options: [.mappedIfSafe]),
-              data.count < 1_048_576,
-              let content = String(data: data, encoding: .utf8) else {
-            showFallback(item)
-            return
-        }
-
-        // Render markdown as attributed string with basic formatting
-        let attributed = renderMarkdown(content)
-        textView.textStorage?.setAttributedString(attributed)
+        loadInBackground(item, work: { [weak self] () -> NSAttributedString? in
+            guard let self = self,
+                  let data = try? Data(contentsOf: item.url, options: [.mappedIfSafe]),
+                  data.count < 1_048_576,
+                  let content = String(data: data, encoding: .utf8) else {
+                return nil
+            }
+            return self.renderMarkdown(content)
+        }, present: { [weak self] attributed in
+            self?.textView.textStorage?.setAttributedString(attributed)
+        })
     }
 
     private func renderMarkdown(_ content: String) -> NSAttributedString {
@@ -208,19 +237,28 @@ final class PreviewPaneController: NSViewController {
         let defaultColor = NSColor.labelColor
         let defaultAttrs: [NSAttributedString.Key: Any] = [.font: defaultFont, .foregroundColor: defaultColor]
 
+        let codeFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+        var insideFence = false
+
         for line in content.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             var attrs = defaultAttrs
 
-            if trimmed.hasPrefix("# ") {
+            if trimmed.hasPrefix("```") {
+                // Fence marker: monospace it and toggle the code-block state.
+                attrs[.font] = codeFont
+                attrs[.foregroundColor] = NSColor.secondaryLabelColor
+                insideFence.toggle()
+            } else if insideFence {
+                // Content inside a fenced block: monospace every line, not just the fences.
+                attrs[.font] = codeFont
+                attrs[.foregroundColor] = NSColor.secondaryLabelColor
+            } else if trimmed.hasPrefix("# ") {
                 attrs[.font] = NSFont.systemFont(ofSize: 22, weight: .bold)
             } else if trimmed.hasPrefix("## ") {
                 attrs[.font] = NSFont.systemFont(ofSize: 18, weight: .bold)
             } else if trimmed.hasPrefix("### ") {
                 attrs[.font] = NSFont.systemFont(ofSize: 15, weight: .semibold)
-            } else if trimmed.hasPrefix("```") {
-                attrs[.font] = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-                attrs[.foregroundColor] = NSColor.secondaryLabelColor
             } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
                 // Keep default
             }
@@ -235,11 +273,24 @@ final class PreviewPaneController: NSViewController {
         hideAll()
         imageView.isHidden = false
 
-        if let image = NSImage(contentsOf: item.url) {
-            imageView.image = image
-        } else {
-            showFallback(item)
-        }
+        loadInBackground(item, work: { [weak self] () -> NSImage? in
+            let maxPixel = self?.maxImagePixelSize ?? 4096
+            // Downsample via CGImageSource so a 100 MB TIFF never inflates to a full-res raster.
+            if let source = CGImageSourceCreateWithURL(item.url as CFURL, nil) {
+                let options: [CFString: Any] = [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+                ]
+                if let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+                    return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+                }
+            }
+            // Fallback for formats CGImageSource can't thumbnail (e.g. SVG).
+            return NSImage(contentsOf: item.url)
+        }, present: { [weak self] image in
+            self?.imageView.image = image
+        })
     }
 
     private func showFallback(_ item: FileItem?) {
