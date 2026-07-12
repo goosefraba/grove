@@ -26,6 +26,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private var contextMenuItem: SidebarItem?
     private var contextMenuRow: Int?
     private var volumeRefreshWorkItem: DispatchWorkItem?
+    private var cachedDragSequence: Int?
+    private var cachedDragOperation: NSDragOperation = []
     private static let sidebarItemPasteboardType = NSPasteboard.PasteboardType("com.grove.sidebaritem")
     private static let sidebarDetailLabelTag = 1_207
 
@@ -219,6 +221,19 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     private func validateExternalDrop(_ info: any NSDraggingInfo) -> NSDragOperation {
+        // Pasteboard reads + file stats are expensive and validateDrop fires on every
+        // mouse-move tick; cache the result per dragging session (#43).
+        let sequence = info.draggingSequenceNumber
+        if cachedDragSequence == sequence {
+            return cachedDragOperation
+        }
+        let operation = computeExternalDropOperation(info)
+        cachedDragSequence = sequence
+        cachedDragOperation = operation
+        return operation
+    }
+
+    private func computeExternalDropOperation(_ info: any NSDraggingInfo) -> NSDragOperation {
         guard let urls = info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [
             .urlReadingFileURLsOnly: true,
         ]) as? [URL] else {
