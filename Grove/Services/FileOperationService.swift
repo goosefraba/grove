@@ -198,12 +198,13 @@ final class FileOperationService {
     }
 
     func batchRename(_ urls: [URL], find: String, replace: String, useRegex: Bool) throws -> [(URL, URL)] {
+        // Compile once up front so an invalid pattern fails before any file is renamed.
+        let regex = useRegex ? try NSRegularExpression(pattern: find) : nil
         var results: [(URL, URL)] = []
         for url in urls {
             let original = url.lastPathComponent
             let renamed: String
-            if useRegex {
-                let regex = try NSRegularExpression(pattern: find)
+            if let regex {
                 let range = NSRange(original.startIndex..., in: original)
                 renamed = regex.stringByReplacingMatches(in: original, range: range, withTemplate: replace)
             } else {
