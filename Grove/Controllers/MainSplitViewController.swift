@@ -89,7 +89,7 @@ final class MainSplitViewController: NSSplitViewController {
 
         if isDualPaneActive {
             if case .local(let url) = location {
-                dualPaneVC?.loadDirectory(url)
+                dualPaneVC?.loadActivePane(url)
             } else {
                 deactivateDualPane()
                 currentContentVC?.loadLocation(location)

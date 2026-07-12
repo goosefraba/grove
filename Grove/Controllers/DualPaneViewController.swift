@@ -96,9 +96,10 @@ final class DualPaneViewController: NSViewController {
         rightPane.loadDirectory(url)
     }
 
-    func setShowsHiddenFiles(_ visible: Bool) {
-        leftPane.setShowsHiddenFiles(visible)
-        rightPane.setShowsHiddenFiles(visible)
+    /// Loads a directory into only the active pane (used for all navigation
+    /// after the initial dual-pane activation, which loads both panes).
+    func loadActivePane(_ url: URL) {
+        activePane.loadDirectory(url)
     }
 
     func createNewFolder() {
