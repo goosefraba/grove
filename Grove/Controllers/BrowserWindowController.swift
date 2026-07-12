@@ -515,27 +515,21 @@ extension BrowserWindowController: BrowserWindowFileDropDelegate {
     }
 
     private func transferDroppedFiles(_ urls: [URL], to destination: URL, isMove: Bool) -> Bool {
-        do {
-            let conflictPrompt = FileConflictResolutionPrompt(window: window)
-            let records: [FileOperationService.FileTransferRecord]
-            if isMove {
-                records = try FileOperationService.shared.moveResolvingConflictsWithRecords(urls, to: destination) { conflict in
-                    conflictPrompt.resolve(conflict)
+        let actionName = isMove ? "Move" : "Copy"
+        FileTransferCoordinator.perform(urls: urls, to: destination, isMove: isMove, presenter: splitVC) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let records):
+                self.registerUndoTransfer(records: records, actionName: actionName)
+                self.splitVC.navigate(to: destination)
+            case .failure(let error):
+                self.registerUndoForCarriedRecords(from: error, actionName: actionName)
+                if !FileListViewController.isCancellation(error) {
+                    self.showError(error)
                 }
-                registerUndoTransfer(records: records, actionName: "Move")
-            } else {
-                records = try FileOperationService.shared.copyResolvingConflictsWithRecords(urls, to: destination) { conflict in
-                    conflictPrompt.resolve(conflict)
-                }
-                registerUndoTransfer(records: records, actionName: "Copy")
             }
-            splitVC.navigate(to: destination)
-            return true
-        } catch {
-            registerUndoForPartialSideEffects(from: error, actionName: isMove ? "Move" : "Copy")
-            showError(error)
-            return false
         }
+        return true
     }
 
     private func registerUndoTransfer(records: [FileOperationService.FileTransferRecord], actionName: String) {
@@ -551,9 +545,14 @@ extension BrowserWindowController: BrowserWindowFileDropDelegate {
         undoManager.setActionName(actionName)
     }
 
-    private func registerUndoForPartialSideEffects(from error: Error, actionName: String) {
-        guard case FileOperationService.FileOperationError.partialFailure(let records, _) = error else { return }
-        registerUndoTransfer(records: records, actionName: actionName)
+    private func registerUndoForCarriedRecords(from error: Error, actionName: String) {
+        switch error {
+        case FileOperationService.FileOperationError.partialFailure(let records, _),
+             FileOperationService.FileOperationError.cancelled(let records):
+            registerUndoTransfer(records: records, actionName: actionName)
+        default:
+            break
+        }
     }
 
     private func showError(_ error: Error) {

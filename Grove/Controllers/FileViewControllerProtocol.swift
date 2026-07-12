@@ -423,6 +423,56 @@ enum FileRenameHelper {
     }
 }
 
+/// Runs copy/move transfers on a background queue behind a progress sheet so the UI never
+/// blocks, marshalling conflict prompts back to the main thread. Used by all drop and paste
+/// entry points. `completion` runs on the main thread with the resulting records, or an error
+/// (`.cancelled`/`.partialFailure` carry the records completed before the stop for partial undo).
+enum FileTransferCoordinator {
+    static func perform(
+        urls: [URL],
+        to destination: URL,
+        isMove: Bool,
+        presenter: NSViewController,
+        completion: @escaping (Result<[FileOperationService.FileTransferRecord], Error>) -> Void
+    ) {
+        let progressVC = FileProgressViewController()
+        progressVC.configure(operationVerb: isMove ? "Moving" : "Copying")
+        presenter.presentAsSheet(progressVC)
+
+        let prompt = FileConflictResolutionPrompt(window: presenter.view.window)
+        let resolver: (FileOperationService.FileConflict) -> FileOperationService.ConflictResolution = { conflict in
+            if Thread.isMainThread {
+                return prompt.resolve(conflict)
+            }
+            return DispatchQueue.main.sync { prompt.resolve(conflict) }
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result: Result<[FileOperationService.FileTransferRecord], Error>
+            do {
+                let records = try FileOperationService.shared.transferResolvingConflictsWithProgress(
+                    urls,
+                    to: destination,
+                    isMove: isMove,
+                    resolver: resolver,
+                    progress: { value, name in
+                        DispatchQueue.main.async { progressVC.updateProgress(value, fileName: name) }
+                    },
+                    cancelled: { progressVC.isCancelled }
+                )
+                result = .success(records)
+            } catch {
+                result = .failure(error)
+            }
+
+            DispatchQueue.main.async {
+                presenter.dismiss(progressVC)
+                completion(result)
+            }
+        }
+    }
+}
+
 final class FileConflictResolutionPrompt {
     private weak var window: NSWindow?
     private var applyToAllResolution: FileOperationService.ConflictResolution?

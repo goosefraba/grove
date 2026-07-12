@@ -321,31 +321,33 @@ final class IconViewController: NSViewController, FileViewControllerProtocol,
             destination = currentURL
         }
 
-        do {
-            let conflictPrompt = FileConflictResolutionPrompt(window: view.window)
-            let records: [FileOperationService.FileTransferRecord]
-            let operation = FileDropOperationResolver.preferredOperation(from: draggingInfo.draggingSourceOperationMask)
-            let isMove = FileDropOperationResolver.isMove(operation)
-            if isMove {
-                records = try FileOperationService.shared.moveResolvingConflictsWithRecords(urls, to: destination) { conflict in
-                    conflictPrompt.resolve(conflict)
-                }
-            } else {
-                records = try FileOperationService.shared.copyResolvingConflictsWithRecords(urls, to: destination) { conflict in
-                    conflictPrompt.resolve(conflict)
+        let operation = FileDropOperationResolver.preferredOperation(from: draggingInfo.draggingSourceOperationMask)
+        let isMove = FileDropOperationResolver.isMove(operation)
+        let actionName = isMove ? "Move" : "Copy"
+        FileTransferCoordinator.perform(urls: urls, to: destination, isMove: isMove, presenter: self) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let records):
+                self.registerUndoTransfer(records: records, actionName: actionName)
+                self.reloadContents()
+            case .failure(let error):
+                self.registerUndoForCarriedRecords(from: error, actionName: actionName)
+                self.reloadContents()
+                if !FileListViewController.isCancellation(error) {
+                    self.showError(error)
                 }
             }
-            registerUndoTransfer(records: records, actionName: isMove ? "Move" : "Copy")
-            reloadContents()
-            return true
-        } catch FileOperationService.FileOperationError.partialFailure(let records, let underlying) {
-            let isMove = FileDropOperationResolver.isMove(FileDropOperationResolver.preferredOperation(from: draggingInfo.draggingSourceOperationMask))
-            registerUndoTransfer(records: records, actionName: isMove ? "Move" : "Copy")
-            showError(underlying)
-            return false
-        } catch {
-            showError(error)
-            return false
+        }
+        return true
+    }
+
+    private func registerUndoForCarriedRecords(from error: Error, actionName: String) {
+        switch error {
+        case FileOperationService.FileOperationError.partialFailure(let records, _),
+             FileOperationService.FileOperationError.cancelled(let records):
+            registerUndoTransfer(records: records, actionName: actionName)
+        default:
+            break
         }
     }
 

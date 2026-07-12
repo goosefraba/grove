@@ -147,7 +147,6 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     private var reloadWorkItem: DispatchWorkItem?
     private var spinnerWorkItem: DispatchWorkItem?
     private var loadGeneration: UInt = 0
-    private static let fileOperationPasteboardType = NSPasteboard.PasteboardType("com.grove.file-operation")
     // Cached set of cut file URLs, derived from the general pasteboard. Recomputed only when
     // the pasteboard's changeCount changes so cell rendering stays cheap.
     private var cachedCutChangeCount: Int = -1
@@ -718,7 +717,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.writeObjects(urls as [NSURL])
-        pb.setString("copy", forType: Self.fileOperationPasteboardType)
+        pb.setString("copy", forType: FileOperationClipboard.pasteboardType)
         refreshCutIndication()
     }
 
@@ -729,7 +728,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.writeObjects(urls as [NSURL])
-        pb.setString("cut", forType: Self.fileOperationPasteboardType)
+        pb.setString("cut", forType: FileOperationClipboard.pasteboardType)
         refreshCutIndication()
     }
 
@@ -738,7 +737,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         let pb = NSPasteboard.general
         if pb.changeCount != cachedCutChangeCount {
             cachedCutChangeCount = pb.changeCount
-            if pb.string(forType: Self.fileOperationPasteboardType) == "cut",
+            if pb.string(forType: FileOperationClipboard.pasteboardType) == "cut",
                let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] {
                 cachedCutURLs = Set(urls.map { $0.standardizedFileURL })
             } else {
@@ -764,75 +763,13 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
         // Cut vs copy is determined solely by the private pasteboard type written atomically
         // with the URLs, so it stays correct across app relaunch and window boundaries.
-        let isCut = pb.string(forType: Self.fileOperationPasteboardType) == "cut"
+        let isCut = pb.string(forType: FileOperationClipboard.pasteboardType) == "cut"
         let destination = currentURL
 
-        // Use progress sheet for operations with more than 3 files
-        if urls.count > 3,
-           !FileOperationService.shared.hasNameConflicts(urls, in: destination),
-           view.window != nil {
-            let progressVC = FileProgressViewController()
-
-            presentAsSheet(progressVC)
-
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                do {
-                    if isCut {
-                        let movedURLs = try FileOperationService.shared.moveWithProgress(urls, to: destination, progress: { value, name in
-                            DispatchQueue.main.async {
-                                progressVC.updateProgress(value, fileName: name)
-                            }
-                        }, cancelled: { progressVC.isCancelled })
-                        DispatchQueue.main.async {
-                            NSPasteboard.general.clearContents()
-                            self?.registerUndoMove(originalURLs: urls, movedURLs: movedURLs)
-                            self?.refreshCutIndication()
-                        }
-                    } else {
-                        let copiedURLs = try FileOperationService.shared.copyWithProgress(urls, to: destination, progress: { value, name in
-                            DispatchQueue.main.async {
-                                progressVC.updateProgress(value, fileName: name)
-                            }
-                        }, cancelled: { progressVC.isCancelled })
-                        DispatchQueue.main.async {
-                            self?.registerUndoCopy(copiedURLs: copiedURLs)
-                        }
-                    }
-                    DispatchQueue.main.async {
-                        self?.dismiss(progressVC)
-                    }
-                } catch FileOperationService.FileOperationError.cancelled(let records) {
-                    DispatchQueue.main.async {
-                        self?.registerUndoTransfer(records: records, actionName: isCut ? "Move" : "Copy")
-                        self?.dismiss(progressVC)
-                    }
-                } catch FileOperationService.FileOperationError.partialFailure(let records, let underlying) {
-                    DispatchQueue.main.async {
-                        self?.registerUndoTransfer(records: records, actionName: isCut ? "Move" : "Copy")
-                        self?.dismiss(progressVC)
-                        self?.showError(underlying)
-                    }
-                } catch {
-                    DispatchQueue.main.async {
-                        self?.dismiss(progressVC)
-                        self?.showError(error)
-                    }
-                }
-            }
-        } else {
-            do {
-                let records = try transferFiles(urls, to: destination, isMove: isCut)
-                if isCut {
-                    pb.clearContents()
-                    registerUndoTransfer(records: records, actionName: "Move")
-                    refreshCutIndication()
-                } else {
-                    registerUndoTransfer(records: records, actionName: "Copy")
-                }
-            } catch {
-                registerUndoForPartialSideEffects(from: error, actionName: isCut ? "Move" : "Copy")
-                showError(error)
-            }
+        performBackgroundTransfer(urls, to: destination, isMove: isCut) { [weak self] in
+            guard isCut else { return }
+            NSPasteboard.general.clearContents()
+            self?.refreshCutIndication()
         }
     }
 
@@ -868,7 +805,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
                 let records = try FileOperationService.shared.moveToTrashRecords(urls)
                 self?.registerUndoTransfer(records: records, actionName: "Move to Trash")
             } catch {
-                self?.registerUndoForPartialSideEffects(from: error, actionName: "Move to Trash")
+                self?.registerUndoForCarriedRecords(from: error, actionName: "Move to Trash")
                 self?.showError(error)
             }
         }
@@ -935,13 +872,13 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         let urls = selectedItems.map(\.url)
         guard !urls.isEmpty else { return }
 
-        var duplicatedURLs: [URL] = []
+        var records: [FileOperationService.FileTransferRecord] = []
         do {
             for url in urls {
                 let newURL = try FileOperationService.shared.duplicate(url)
-                duplicatedURLs.append(newURL)
+                records.append(FileOperationService.FileTransferRecord(sourceURL: url, destinationURL: newURL, undoBehavior: .trashDestination))
             }
-            registerUndoCopy(copiedURLs: duplicatedURLs)
+            registerUndoTransfer(records: records, actionName: "Duplicate")
         } catch {
             showError(error)
         }
@@ -958,52 +895,13 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
     // MARK: - Undo Registration
 
-    private func registerUndoMove(originalURLs: [URL], movedURLs: [URL]) {
-        guard let undoManager = fileUndoManager else { return }
-        undoManager.registerUndo(withTarget: self) { target in
-            do {
-                for (movedURL, original) in zip(movedURLs, originalURLs) {
-                    let originalDir = original.deletingLastPathComponent()
-                    _ = try FileOperationService.shared.move([movedURL], to: originalDir)
-                }
-            } catch {
-                target.showError(error)
-            }
-        }
-        undoManager.setActionName("Move")
-    }
-
-    private func registerUndoRename(originalURL: URL, newURL: URL) {
-        guard let undoManager = fileUndoManager else { return }
-        let originalName = originalURL.lastPathComponent
-        undoManager.registerUndo(withTarget: self) { target in
-            do {
-                _ = try FileOperationService.shared.rename(newURL, to: originalName)
-            } catch {
-                target.showError(error)
-            }
-        }
-        undoManager.setActionName("Rename")
-    }
-
-    private func registerUndoCopy(copiedURLs: [URL]) {
-        guard let undoManager = fileUndoManager else { return }
-        undoManager.registerUndo(withTarget: self) { target in
-            do {
-                _ = try FileOperationService.shared.moveToTrash(copiedURLs)
-            } catch {
-                target.showError(error)
-            }
-        }
-        undoManager.setActionName("Copy")
-    }
-
     private func registerUndoTransfer(records: [FileOperationService.FileTransferRecord], actionName: String) {
         let undoableRecords = records.filter(\.isUndoable)
         guard !undoableRecords.isEmpty, let undoManager = fileUndoManager else { return }
         undoManager.registerUndo(withTarget: self) { target in
             do {
                 try FileOperationService.shared.undoTransferRecords(undoableRecords)
+                target.registerRedoTransfer(records: undoableRecords, actionName: actionName)
             } catch {
                 target.showError(error)
             }
@@ -1011,9 +909,27 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         undoManager.setActionName(actionName)
     }
 
-    private func registerUndoForPartialSideEffects(from error: Error, actionName: String) {
-        guard case FileOperationService.FileOperationError.partialFailure(let records, _) = error else { return }
-        registerUndoTransfer(records: records, actionName: actionName)
+    private func registerRedoTransfer(records: [FileOperationService.FileTransferRecord], actionName: String) {
+        guard let undoManager = fileUndoManager else { return }
+        undoManager.registerUndo(withTarget: self) { target in
+            do {
+                try FileOperationService.shared.redoTransferRecords(records)
+                target.registerUndoTransfer(records: records, actionName: actionName)
+            } catch {
+                target.showError(error)
+            }
+        }
+        undoManager.setActionName(actionName)
+    }
+
+    private func registerUndoForCarriedRecords(from error: Error, actionName: String) {
+        switch error {
+        case FileOperationService.FileOperationError.partialFailure(let records, _),
+             FileOperationService.FileOperationError.cancelled(let records):
+            registerUndoTransfer(records: records, actionName: actionName)
+        default:
+            break
+        }
     }
 
     private func showError(_ error: Error) {
@@ -1094,16 +1010,34 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     }
 
     private func performFileTransfer(_ urls: [URL], to destination: URL, isMove: Bool) -> Bool {
-        do {
-            let records = try transferFiles(urls, to: destination, isMove: isMove)
-            registerUndoTransfer(records: records, actionName: isMove ? "Move" : "Copy")
-            reloadContents()
-            return true
-        } catch {
-            registerUndoForPartialSideEffects(from: error, actionName: isMove ? "Move" : "Copy")
-            showError(error)
-            return false
+        performBackgroundTransfer(urls, to: destination, isMove: isMove)
+        return true
+    }
+
+    /// Routes every copy/move (drops and pastes) through the background progress coordinator so
+    /// the main thread never blocks, then registers undo for the resulting (or partial) records.
+    private func performBackgroundTransfer(_ urls: [URL], to destination: URL, isMove: Bool, onSuccess: (() -> Void)? = nil) {
+        let actionName = isMove ? "Move" : "Copy"
+        FileTransferCoordinator.perform(urls: urls, to: destination, isMove: isMove, presenter: self) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let records):
+                onSuccess?()
+                self.registerUndoTransfer(records: records, actionName: actionName)
+                self.reloadContents()
+            case .failure(let error):
+                self.registerUndoForCarriedRecords(from: error, actionName: actionName)
+                self.reloadContents()
+                if !FileListViewController.isCancellation(error) {
+                    self.showError(error)
+                }
+            }
         }
+    }
+
+    static func isCancellation(_ error: Error) -> Bool {
+        if case FileOperationService.FileOperationError.cancelled = error { return true }
+        return false
     }
 
     // MARK: - NSTableViewDelegate
@@ -1304,7 +1238,10 @@ extension FileListViewController: NSTextFieldDelegate {
         if newName != item.name && !newName.isEmpty {
             do {
                 let newURL = try FileOperationService.shared.rename(item.url, to: newName)
-                registerUndoRename(originalURL: item.url, newURL: newURL)
+                registerUndoTransfer(
+                    records: [FileOperationService.FileTransferRecord(sourceURL: item.url, destinationURL: newURL, undoBehavior: .moveBackToSource)],
+                    actionName: "Rename"
+                )
                 pendingSelectionURL = newURL
                 reloadContents()
             } catch {
@@ -1854,19 +1791,6 @@ extension FileListViewController: NSMenuDelegate {
                 case .failure(let error):
                     self?.showError(error)
                 }
-            }
-        }
-    }
-
-    private func transferFiles(_ urls: [URL], to destination: URL, isMove: Bool) throws -> [FileOperationService.FileTransferRecord] {
-        let conflictPrompt = FileConflictResolutionPrompt(window: view.window)
-        if isMove {
-            return try FileOperationService.shared.moveResolvingConflictsWithRecords(urls, to: destination) { conflict in
-                conflictPrompt.resolve(conflict)
-            }
-        } else {
-            return try FileOperationService.shared.copyResolvingConflictsWithRecords(urls, to: destination) { conflict in
-                conflictPrompt.resolve(conflict)
             }
         }
     }
