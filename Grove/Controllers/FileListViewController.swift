@@ -372,13 +372,16 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         searchScopeLabel.isHidden = false
         updateScrollViewTop()
 
-        SearchService.shared.search(query: query, in: currentURL) { [weak self] results in
+        SearchService.shared.search(query: query, in: currentURL) { [weak self] results, moreAvailable in
             guard let self = self, self.isShowingSearchResults else { return }
             self.allItems = results
             self.items = results
             self.sortItems()
             self.tableView.reloadData()
             self.updateStatusBar()
+            self.searchScopeLabel.stringValue = moreAvailable
+                ? "Searching in: \(self.currentURL.lastPathComponent) (showing first \(results.count), more available)"
+                : "Searching in: \(self.currentURL.lastPathComponent)"
             self.emptyLabel.isHidden = !results.isEmpty
             if results.isEmpty {
                 self.emptyLabel.stringValue = "No results for \"\(query)\""
