@@ -16,6 +16,9 @@ final class GoToFolderPanelController: NSObject, NSTextFieldDelegate, NSTableVie
     private static let collapsedPanelHeight: CGFloat = 130
     private static let suggestionsRowHeight: CGFloat = 22
     private static let maxVisibleSuggestions = 8
+    // Fixed suggestions area + panel height so the sheet never resizes while typing.
+    private static let suggestionsAreaHeight: CGFloat = CGFloat(maxVisibleSuggestions) * suggestionsRowHeight + 4
+    private static let expandedPanelHeight: CGFloat = collapsedPanelHeight + suggestionsAreaHeight + 6
 
     // MARK: - History
 
@@ -38,7 +41,7 @@ final class GoToFolderPanelController: NSObject, NSTextFieldDelegate, NSTableVie
 
     func showPanel(relativeTo window: NSWindow) {
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: Self.collapsedPanelHeight),
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: Self.expandedPanelHeight),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: true
@@ -46,7 +49,7 @@ final class GoToFolderPanelController: NSObject, NSTextFieldDelegate, NSTableVie
         panel.title = "Go to Folder"
         panel.isFloatingPanel = true
         panel.becomesKeyOnlyIfNeeded = false
-        panel.minSize = NSSize(width: 420, height: Self.collapsedPanelHeight)
+        panel.minSize = NSSize(width: 420, height: Self.expandedPanelHeight)
         self.panel = panel
 
         let contentView = NSView(frame: panel.contentRect(forFrameRect: panel.frame))
@@ -90,7 +93,6 @@ final class GoToFolderPanelController: NSObject, NSTextFieldDelegate, NSTableVie
         scrollView.autohidesScrollers = true
         scrollView.borderType = .bezelBorder
         scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.isHidden = true
         contentView.addSubview(scrollView)
 
         self.suggestionsTableView = tableView
@@ -130,8 +132,8 @@ final class GoToFolderPanelController: NSObject, NSTextFieldDelegate, NSTableVie
             cancelButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 70),
         ])
 
-        // Scroll view height starts at 0 (hidden)
-        let heightConstraint = scrollView.heightAnchor.constraint(equalToConstant: 0)
+        // Fixed-height suggestions area — sheet size stays constant while typing.
+        let heightConstraint = scrollView.heightAnchor.constraint(equalToConstant: Self.suggestionsAreaHeight)
         heightConstraint.isActive = true
         self.panelHeightConstraint = heightConstraint
 
@@ -162,24 +164,7 @@ final class GoToFolderPanelController: NSObject, NSTextFieldDelegate, NSTableVie
 
         selectedSuggestionIndex = -1
         suggestionsTableView?.reloadData()
-
-        let visibleRows = min(suggestions.count, Self.maxVisibleSuggestions)
-        let tableHeight = CGFloat(visibleRows) * Self.suggestionsRowHeight + 4
-        let showSuggestions = !suggestions.isEmpty
-
-        suggestionsScrollView?.isHidden = !showSuggestions
-        panelHeightConstraint?.constant = showSuggestions ? tableHeight : 0
-
-        // Resize panel content to fit suggestions
-        if let panel = panel {
-            let extraHeight = showSuggestions ? tableHeight + 6 : 0
-            let targetHeight = Self.collapsedPanelHeight + extraHeight
-            var frame = panel.frame
-            let delta = targetHeight - frame.height
-            frame.size.height = targetHeight
-            frame.origin.y -= delta
-            panel.setFrame(frame, display: true, animate: false)
-        }
+        // Fixed-height area: no panel frame resizing — the table just scrolls.
     }
 
     private func filesystemCompletions(for text: String) -> [String] {
