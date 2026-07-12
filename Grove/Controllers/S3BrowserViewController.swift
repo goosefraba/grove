@@ -1021,9 +1021,10 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 36 {
             let row = tableView.selectedRow
-            guard row >= 0, row < items.count, items[row].isPrefix else { return }
-            delegate?.fileListDidNavigate(to: .s3(items[row].location))
-            return
+            if row >= 0, row < items.count, items[row].isPrefix {
+                delegate?.fileListDidNavigate(to: .s3(items[row].location))
+                return
+            }
         }
         super.keyDown(with: event)
     }
