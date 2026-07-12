@@ -646,10 +646,8 @@ final class FileOperationService {
     private func archiveExtractionFolderName(for archiveURL: URL) -> String {
         let filename = archiveURL.lastPathComponent
         let lowercasedFilename = filename.lowercased()
-        let archiveExtensions = [
-            ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst",
-            ".tgz", ".tbz2", ".txz", ".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar"
-        ]
+        // ditto -x -k only extracts ZIP archives; advertising other formats is dead capability.
+        let archiveExtensions = [".zip"]
 
         for archiveExtension in archiveExtensions where lowercasedFilename.hasSuffix(archiveExtension) {
             let endIndex = filename.index(filename.endIndex, offsetBy: -archiveExtension.count)
