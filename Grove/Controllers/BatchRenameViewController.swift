@@ -1,7 +1,7 @@
 import AppKit
 
 protocol BatchRenameViewControllerDelegate: AnyObject {
-    func batchRenameDidComplete()
+    func batchRenameDidComplete(records: [FileOperationService.FileTransferRecord])
 }
 
 final class BatchRenameViewController: NSViewController {
@@ -15,9 +15,10 @@ final class BatchRenameViewController: NSViewController {
     private let scrollView = NSScrollView()
     private let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
     private let renameButton = NSButton(title: "Rename", target: nil, action: nil)
+    private let warningLabel = NSTextField(labelWithString: "")
 
     private var urls: [URL] = []
-    private var previewNames: [(original: String, renamed: String)] = []
+    private var previewEntries: [FileOperationService.BatchRenameEntry] = []
 
     private let originalColumn = NSUserInterfaceItemIdentifier("OriginalColumn")
     private let renamedColumn = NSUserInterfaceItemIdentifier("RenamedColumn")
@@ -101,7 +102,18 @@ final class BatchRenameViewController: NSViewController {
         renameButton.bezelColor = .controlAccentColor
         view.addSubview(renameButton)
 
+        warningLabel.translatesAutoresizingMaskIntoConstraints = false
+        warningLabel.textColor = .systemRed
+        warningLabel.font = .systemFont(ofSize: 11)
+        warningLabel.lineBreakMode = .byTruncatingTail
+        warningLabel.stringValue = ""
+        view.addSubview(warningLabel)
+
         NSLayoutConstraint.activate([
+            warningLabel.centerYAnchor.constraint(equalTo: cancelButton.centerYAnchor),
+            warningLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            warningLabel.trailingAnchor.constraint(lessThanOrEqualTo: cancelButton.leadingAnchor, constant: -8),
+
             findLabel.topAnchor.constraint(equalTo: view.topAnchor, constant: 20),
             findLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             findLabel.widthAnchor.constraint(equalToConstant: 60),
@@ -139,26 +151,13 @@ final class BatchRenameViewController: NSViewController {
         let replace = replaceField.stringValue
         let useRegex = regexCheckbox.state == .on
 
-        previewNames = urls.map { url in
-            let original = url.lastPathComponent
-            let renamed: String
-            if find.isEmpty {
-                renamed = original
-            } else if useRegex {
-                guard let regex = try? NSRegularExpression(pattern: find) else {
-                    return (original: original, renamed: original)
-                }
-                let range = NSRange(original.startIndex..., in: original)
-                renamed = regex.stringByReplacingMatches(in: original, range: range, withTemplate: replace)
-            } else {
-                renamed = original.replacingOccurrences(of: find, with: replace)
-            }
-            return (original: original, renamed: renamed)
-        }
+        previewEntries = FileOperationService.shared.batchRenamePreview(urls, find: find, replace: replace, useRegex: useRegex)
         previewTable.reloadData()
 
-        let hasChanges = previewNames.contains { $0.original != $0.renamed }
-        renameButton.isEnabled = hasChanges && !find.isEmpty
+        let hasChanges = previewEntries.contains(where: \.isChanged)
+        let hasCollision = previewEntries.contains(where: \.isCollision)
+        warningLabel.stringValue = hasCollision ? "Multiple items would share the same name." : ""
+        renameButton.isEnabled = hasChanges && !find.isEmpty && !hasCollision
     }
 
     @objc private func fieldChanged(_ sender: Any?) {
@@ -179,16 +178,24 @@ final class BatchRenameViewController: NSViewController {
         let useRegex = regexCheckbox.state == .on
 
         do {
-            _ = try FileOperationService.shared.batchRename(urls, find: find, replace: replace, useRegex: useRegex)
-            delegate?.batchRenameDidComplete()
+            let records = try FileOperationService.shared.batchRename(urls, find: find, replace: replace, useRegex: useRegex)
+            delegate?.batchRenameDidComplete(records: records)
             dismiss(nil)
+        } catch FileOperationService.FileOperationError.partialFailure(let records, let underlying) {
+            // Some files were renamed before the failure: register undo for those, then report.
+            delegate?.batchRenameDidComplete(records: records)
+            showError(underlying)
         } catch {
-            let alert = NSAlert(error: error)
-            if let window = view.window {
-                alert.beginSheetModal(for: window, completionHandler: nil)
-            } else {
-                alert.runModal()
-            }
+            showError(error)
+        }
+    }
+
+    private func showError(_ error: Error) {
+        let alert = NSAlert(error: error)
+        if let window = view.window {
+            alert.beginSheetModal(for: window, completionHandler: nil)
+        } else {
+            alert.runModal()
         }
     }
 }
@@ -197,7 +204,7 @@ final class BatchRenameViewController: NSViewController {
 
 extension BatchRenameViewController: NSTableViewDataSource {
     func numberOfRows(in tableView: NSTableView) -> Int {
-        previewNames.count
+        previewEntries.count
     }
 }
 
@@ -205,8 +212,8 @@ extension BatchRenameViewController: NSTableViewDataSource {
 
 extension BatchRenameViewController: NSTableViewDelegate {
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard row < previewNames.count, let columnID = tableColumn?.identifier else { return nil }
-        let entry = previewNames[row]
+        guard row < previewEntries.count, let columnID = tableColumn?.identifier else { return nil }
+        let entry = previewEntries[row]
 
         let cellID = NSUserInterfaceItemIdentifier("BatchCell_\(columnID.rawValue)")
         let cell = tableView.makeView(withIdentifier: cellID, owner: self) as? NSTableCellView ?? NSTableCellView()
@@ -227,11 +234,15 @@ extension BatchRenameViewController: NSTableViewDelegate {
 
         switch columnID {
         case originalColumn:
-            cell.textField?.stringValue = entry.original
+            cell.textField?.stringValue = entry.originalName
             cell.textField?.textColor = .labelColor
         case renamedColumn:
-            cell.textField?.stringValue = entry.renamed
-            cell.textField?.textColor = entry.original != entry.renamed ? .systemBlue : .labelColor
+            cell.textField?.stringValue = entry.newName
+            if entry.isCollision {
+                cell.textField?.textColor = .systemRed
+            } else {
+                cell.textField?.textColor = entry.isChanged ? .systemBlue : .labelColor
+            }
         default:
             break
         }

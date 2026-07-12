@@ -38,6 +38,7 @@ final class FileOperationService {
     enum FileOperationError: LocalizedError {
         case invalidFileName(String)
         case invalidDestination(operationIsMove: Bool)
+        case nameCollision(String)
         case cancelled(records: [FileTransferRecord])
         case partialFailure(records: [FileTransferRecord], underlying: Error)
 
@@ -49,6 +50,8 @@ final class FileOperationService {
                 return operationIsMove
                     ? "You can't move an item into itself."
                     : "You can't copy an item into itself."
+            case .nameCollision(let name):
+                return "The name \"\(name)\" would be used by more than one item."
             case .cancelled:
                 return "File operation cancelled."
             case .partialFailure(_, let underlying):
@@ -119,15 +122,28 @@ final class FileOperationService {
     }
 
     func moveToTrash(_ urls: [URL]) throws -> [URL] {
-        var resultURLs: [URL] = []
+        try moveToTrashRecords(urls).map(\.destinationURL)
+    }
+
+    /// Trashes each URL, returning a record per successfully-trashed item. On a mid-loop
+    /// failure it throws `.partialFailure` carrying the records completed so far, so the
+    /// caller can register undo for them instead of silently losing the completed work.
+    /// Items whose trash location is unknown (nil `resultingItemURL`) are skipped rather
+    /// than paired positionally, avoiding restore-to-wrong-location misalignment.
+    func moveToTrashRecords(_ urls: [URL]) throws -> [FileTransferRecord] {
+        var records: [FileTransferRecord] = []
         for url in urls {
             var trashURL: NSURL?
-            try fileManager.trashItem(at: url, resultingItemURL: &trashURL)
+            do {
+                try fileManager.trashItem(at: url, resultingItemURL: &trashURL)
+            } catch {
+                throw FileOperationError.partialFailure(records: records, underlying: error)
+            }
             if let trashURL = trashURL as URL? {
-                resultURLs.append(trashURL)
+                records.append(FileTransferRecord(sourceURL: url, destinationURL: trashURL, undoBehavior: .moveBackToSource))
             }
         }
-        return resultURLs
+        return records
     }
 
     func copy(_ urls: [URL], to destination: URL) throws -> [URL] {
@@ -202,25 +218,76 @@ final class FileOperationService {
         return destURL
     }
 
-    func batchRename(_ urls: [URL], find: String, replace: String, useRegex: Bool) throws -> [(URL, URL)] {
-        // Compile once up front so an invalid pattern fails before any file is renamed.
+    struct BatchRenameEntry {
+        let url: URL
+        let originalName: String
+        let newName: String
+        let isCollision: Bool
+
+        var isChanged: Bool { newName != originalName }
+    }
+
+    /// Computes the target name for each URL and flags collisions: two or more items that
+    /// would end up with the same name, or a changed name that would clash with an existing
+    /// sibling not itself being renamed. Comparison is case-insensitive to match the default
+    /// (case-insensitive) macOS filesystem. Shared by the preview UI and `batchRename`.
+    func batchRenamePreview(_ urls: [URL], find: String, replace: String, useRegex: Bool) throws -> [BatchRenameEntry] {
         let regex = useRegex ? try NSRegularExpression(pattern: find) : nil
-        var results: [(URL, URL)] = []
-        for url in urls {
+        let targets: [(url: URL, original: String, new: String)] = urls.map { url in
             let original = url.lastPathComponent
-            let renamed: String
-            if let regex {
-                let range = NSRange(original.startIndex..., in: original)
-                renamed = regex.stringByReplacingMatches(in: original, range: range, withTemplate: replace)
-            } else {
-                renamed = original.replacingOccurrences(of: find, with: replace)
+            let renamed = renamedString(for: original, find: find, replace: replace, useRegex: useRegex, regex: regex)
+            let new = (renamed.isEmpty || find.isEmpty) ? original : renamed
+            return (url, original, new)
+        }
+
+        // Count final names (unchanged items keep their original name).
+        var nameCounts: [String: Int] = [:]
+        for target in targets {
+            nameCounts[target.new.lowercased(), default: 0] += 1
+        }
+        // Lowercased to match the case-insensitive fileExists check below, so a pure
+        // case-only rename (readme.txt -> README.txt) isn't flagged as a self-collision.
+        let renameSet = Set(targets.map { $0.url.standardizedFileURL.path.lowercased() })
+
+        return targets.map { target in
+            var collides = nameCounts[target.new.lowercased(), default: 0] > 1
+            if !collides, target.new != target.original {
+                let destURL = target.url.deletingLastPathComponent().appendingPathComponent(target.new)
+                if fileManager.fileExists(atPath: destURL.path),
+                   !renameSet.contains(destURL.standardizedFileURL.path.lowercased()) {
+                    collides = true
+                }
             }
-            if renamed != original && !renamed.isEmpty {
-                let newURL = try rename(url, to: renamed)
-                results.append((url, newURL))
+            return BatchRenameEntry(url: target.url, originalName: target.original, newName: target.new, isCollision: collides)
+        }
+    }
+
+    private func renamedString(for original: String, find: String, replace: String, useRegex: Bool, regex: NSRegularExpression?) -> String {
+        guard !find.isEmpty else { return original }
+        if useRegex {
+            guard let regex else { return original }
+            let range = NSRange(original.startIndex..., in: original)
+            return regex.stringByReplacingMatches(in: original, range: range, withTemplate: replace)
+        }
+        return original.replacingOccurrences(of: find, with: replace)
+    }
+
+    func batchRename(_ urls: [URL], find: String, replace: String, useRegex: Bool) throws -> [FileTransferRecord] {
+        let entries = try batchRenamePreview(urls, find: find, replace: replace, useRegex: useRegex)
+        if let collision = entries.first(where: \.isCollision) {
+            throw FileOperationError.nameCollision(collision.newName)
+        }
+
+        var records: [FileTransferRecord] = []
+        for entry in entries where entry.isChanged {
+            do {
+                let newURL = try rename(entry.url, to: entry.newName)
+                records.append(FileTransferRecord(sourceURL: entry.url, destinationURL: newURL, undoBehavior: .moveBackToSource))
+            } catch {
+                throw FileOperationError.partialFailure(records: records, underlying: error)
             }
         }
-        return results
+        return records
     }
 
     // MARK: - Progress Operations
@@ -316,22 +383,83 @@ final class FileOperationService {
         }
     }
 
+    /// Conflict-aware copy/move that also reports progress and honours cancellation, so it
+    /// can run on a background queue behind a progress sheet. On cancel it throws
+    /// `.cancelled` carrying the records completed so far (partial-undo).
+    func transferResolvingConflictsWithProgress(
+        _ urls: [URL],
+        to destination: URL,
+        isMove: Bool,
+        resolver: (FileConflict) -> ConflictResolution,
+        progress: @escaping (Double, String) -> Void,
+        cancelled: @escaping () -> Bool
+    ) throws -> [FileTransferRecord] {
+        try transfer(
+            urls,
+            to: destination,
+            operation: isMove ? .move : .copy,
+            resolver: resolver,
+            progress: progress,
+            cancelled: cancelled
+        )
+    }
+
+    /// Byte-progress context threaded through the conflict-aware transfer so single-file copies
+    /// advance smoothly (via `copyfile(3)`) instead of jumping per item. `base` is the number of
+    /// bytes already fully transferred before the current item.
+    private struct TransferByteProgress {
+        let total: Int64
+        let base: Int64
+        let report: (Double, String) -> Void
+        let cancelled: () -> Bool
+    }
+
+    private func copyTracker(_ byteProgress: TransferByteProgress?, name: String) -> CopyfileProgress? {
+        guard let byteProgress else { return nil }
+        return CopyfileProgress(total: byteProgress.total, base: byteProgress.base, isCancelled: byteProgress.cancelled) {
+            byteProgress.report($0, name)
+        }
+    }
+
     private func transfer(
         _ urls: [URL],
         to destination: URL,
         operation: TransferOperation,
-        resolver: (FileConflict) -> ConflictResolution
+        resolver: (FileConflict) -> ConflictResolution,
+        progress: ((Double, String) -> Void)? = nil,
+        cancelled: (() -> Bool)? = nil
     ) throws -> [FileTransferRecord] {
         try validateTransferDestination(urls, to: destination, operationIsMove: operation == .move)
         var records: [FileTransferRecord] = []
+        let totalBytes = byteSize(of: urls)
+        var completedBytes: Int64 = 0
 
         for url in urls {
+            if cancelled?() == true {
+                throw FileOperationError.cancelled(records: records)
+            }
+            let sourceBytes = byteSize(of: url)
+            progress?(fraction(completedBytes, totalBytes), url.lastPathComponent)
+            // Only route through the byte-level copy path when a caller is actually consuming
+            // progress; the plain conflict-resolving copy/move APIs keep FileManager semantics.
+            let byteProgress = progress.map { report in
+                TransferByteProgress(
+                    total: totalBytes,
+                    base: completedBytes,
+                    report: report,
+                    cancelled: cancelled ?? { false }
+                )
+            }
             do {
-                records.append(contentsOf: try transfer(url, to: destination, operation: operation, resolver: resolver))
+                records.append(contentsOf: try transfer(url, to: destination, operation: operation, resolver: resolver, byteProgress: byteProgress))
+            } catch is CancellationSentinel {
+                throw FileOperationError.cancelled(records: records)
             } catch {
                 throw FileOperationError.partialFailure(records: records, underlying: error)
             }
+            completedBytes += sourceBytes
         }
+        progress?(1.0, "")
 
         return records
     }
@@ -340,11 +468,18 @@ final class FileOperationService {
         _ url: URL,
         to directory: URL,
         operation: TransferOperation,
-        resolver: (FileConflict) -> ConflictResolution
+        resolver: (FileConflict) -> ConflictResolution,
+        byteProgress: TransferByteProgress? = nil
     ) throws -> [FileTransferRecord] {
         let destinationURL = directory.appendingPathComponent(url.lastPathComponent)
 
         guard fileManager.fileExists(atPath: destinationURL.path) else {
+            // Route plain copies through the byte-progress copy path; moves are an instant rename
+            // on the same volume (and FileManager handles cross-volume) so item granularity suffices.
+            if operation == .copy, let tracker = copyTracker(byteProgress, name: url.lastPathComponent) {
+                let destURL = try copyItemWithProgress(url, toUniqueIn: directory, tracker: tracker)
+                return [transferRecord(sourceURL: url, destinationURL: destURL, operation: operation)]
+            }
             try performTransfer(url, to: destinationURL, operation: operation)
             return [transferRecord(sourceURL: url, destinationURL: destinationURL, operation: operation)]
         }
@@ -353,7 +488,7 @@ final class FileOperationService {
             guard operation == .copy else {
                 return []
             }
-            let copyURL = try transfer(url, toCopySuffixIn: directory, operation: operation)
+            let copyURL = try transfer(url, toCopySuffixIn: directory, operation: operation, tracker: copyTracker(byteProgress, name: url.lastPathComponent))
             return [transferRecord(sourceURL: url, destinationURL: copyURL, operation: operation)]
         }
 
@@ -367,7 +502,7 @@ final class FileOperationService {
         case .skip:
             return []
         case .keepBoth:
-            let uniqueURL = try transfer(url, toUniqueIn: directory, operation: operation)
+            let uniqueURL = try transfer(url, toUniqueIn: directory, operation: operation, tracker: copyTracker(byteProgress, name: url.lastPathComponent))
             return [transferRecord(sourceURL: url, destinationURL: uniqueURL, operation: operation)]
         case .replace:
             try performReplacingTransfer(url, to: destinationURL, operation: operation)
@@ -380,7 +515,7 @@ final class FileOperationService {
             ]
         case .merge:
             guard conflict.canMerge else {
-                let uniqueURL = try transfer(url, toUniqueIn: directory, operation: operation)
+                let uniqueURL = try transfer(url, toUniqueIn: directory, operation: operation, tracker: copyTracker(byteProgress, name: url.lastPathComponent))
                 return [transferRecord(sourceURL: url, destinationURL: uniqueURL, operation: operation)]
             }
             return try mergeDirectory(sourceURL: url, into: destinationURL, operation: operation, resolver: resolver)
@@ -474,15 +609,21 @@ final class FileOperationService {
     /// Transfers `url` into `directory` under its own name, appending " N" on collision. The transfer
     /// itself is attempted for each candidate and retried on an existence error, so there is no TOCTOU
     /// window between checking a name and using it.
-    private func transfer(_ url: URL, toUniqueIn directory: URL, operation: TransferOperation) throws -> URL {
-        try transferRetryingOnCollision(url, in: directory, operation: operation) { counter in
+    private func transfer(_ url: URL, toUniqueIn directory: URL, operation: TransferOperation, tracker: CopyfileProgress? = nil) throws -> URL {
+        if operation == .copy, let tracker {
+            return try copyItemWithProgress(url, toUniqueIn: directory, tracker: tracker)
+        }
+        return try transferRetryingOnCollision(url, in: directory, operation: operation) { counter in
             self.uniqueName(for: url, counter: counter)
         }
     }
 
     /// Transfers `url` into `directory` using a "_copy"/"_copy_N" suffix, retrying on collision.
-    private func transfer(_ url: URL, toCopySuffixIn directory: URL, operation: TransferOperation) throws -> URL {
-        try transferRetryingOnCollision(url, in: directory, operation: operation) { counter in
+    private func transfer(_ url: URL, toCopySuffixIn directory: URL, operation: TransferOperation, tracker: CopyfileProgress? = nil) throws -> URL {
+        if operation == .copy, let tracker {
+            return try copyItemWithProgress(url, toCopySuffixIn: directory, tracker: tracker)
+        }
+        return try transferRetryingOnCollision(url, in: directory, operation: operation) { counter in
             self.copySuffixName(for: url, counter: counter)
         }
     }
@@ -588,6 +729,19 @@ final class FileOperationService {
     /// byte-level progress callback so large single-file copies advance smoothly instead of jumping from
     /// 0% to done. Preserves metadata via COPYFILE_ALL. Cleans up a partial destination on cancel/error.
     private func copyItemWithProgress(_ source: URL, toUniqueIn directory: URL, tracker: CopyfileProgress) throws -> URL {
+        try copyItemWithProgress(source, in: directory, tracker: tracker) { counter in
+            self.uniqueName(for: source, counter: counter)
+        }
+    }
+
+    /// Byte-progress copy that names the destination with a "_copy"/"_copy_N" suffix, retrying on collision.
+    private func copyItemWithProgress(_ source: URL, toCopySuffixIn directory: URL, tracker: CopyfileProgress) throws -> URL {
+        try copyItemWithProgress(source, in: directory, tracker: tracker) { counter in
+            self.copySuffixName(for: source, counter: counter)
+        }
+    }
+
+    private func copyItemWithProgress(_ source: URL, in directory: URL, tracker: CopyfileProgress, name: (Int) -> String) throws -> URL {
         let state = copyfile_state_alloc()
         defer { copyfile_state_free(state) }
         copyfile_state_set(state, UInt32(COPYFILE_STATE_STATUS_CB), unsafeBitCast(Self.copyfileProgressCallback, to: UnsafeRawPointer.self))
@@ -596,7 +750,7 @@ final class FileOperationService {
         let flags = copyfile_flags_t(UInt32(bitPattern: COPYFILE_ALL | COPYFILE_RECURSIVE | COPYFILE_EXCL))
         var counter = 0
         while true {
-            let destURL = directory.appendingPathComponent(uniqueName(for: source, counter: counter))
+            let destURL = directory.appendingPathComponent(name(counter))
             let result = source.path.withCString { src in
                 destURL.path.withCString { dst in
                     copyfile(src, dst, state, flags)
@@ -665,6 +819,27 @@ final class FileOperationService {
                 } else {
                     try fileManager.moveItem(at: record.destinationURL, to: record.sourceURL)
                 }
+            }
+        }
+    }
+
+    /// Re-applies the original operation captured by `records` — the inverse of
+    /// `undoTransferRecords` — so NSUndoManager's redo step round-trips copy/move/rename/trash.
+    func redoTransferRecords(_ records: [FileTransferRecord]) throws {
+        for record in records where record.isUndoable {
+            switch record.undoBehavior {
+            case .none:
+                continue
+            case .trashDestination:
+                // Original op was a copy/duplicate: recreate the destination from the source.
+                guard fileManager.fileExists(atPath: record.sourceURL.path),
+                      !fileManager.fileExists(atPath: record.destinationURL.path) else { continue }
+                try fileManager.copyItem(at: record.sourceURL, to: record.destinationURL)
+            case .moveBackToSource:
+                // Original op was a move/rename/trash: move the item from source to destination again.
+                guard fileManager.fileExists(atPath: record.sourceURL.path) else { continue }
+                try fileManager.createDirectory(at: record.destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fileManager.moveItem(at: record.sourceURL, to: record.destinationURL)
             }
         }
     }

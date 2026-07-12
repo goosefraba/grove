@@ -148,6 +148,75 @@ final class FileOperationServiceTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: sub.appendingPathComponent("A").path))
     }
 
+    func testMoveToTrashPartialFailureCarriesCompletedRecordAndUndoRestores() throws {
+        let file1 = tempRoot.appendingPathComponent("one.txt")
+        let file3 = tempRoot.appendingPathComponent("three.txt")
+        try "1".write(to: file1, atomically: true, encoding: .utf8)
+        try "3".write(to: file3, atomically: true, encoding: .utf8)
+        let missing = tempRoot.appendingPathComponent("missing.txt")
+
+        var completed: [FileOperationService.FileTransferRecord] = []
+        XCTAssertThrowsError(try FileOperationService.shared.moveToTrashRecords([file1, missing, file3])) { error in
+            guard case FileOperationService.FileOperationError.partialFailure(let records, _) = error else {
+                return XCTFail("Expected partialFailure, got \(error)")
+            }
+            completed = records
+        }
+
+        XCTAssertEqual(completed.count, 1)
+        XCTAssertEqual(completed[0].sourceURL.standardizedFileURL, file1.standardizedFileURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file1.path))
+
+        try FileOperationService.shared.undoTransferRecords(completed)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file1.path))
+    }
+
+    func testBatchRenameThrowsOnCollisionWithoutRenamingAnything() throws {
+        let f1 = tempRoot.appendingPathComponent("foo1.txt")
+        let f2 = tempRoot.appendingPathComponent("foo2.txt")
+        try "a".write(to: f1, atomically: true, encoding: .utf8)
+        try "b".write(to: f2, atomically: true, encoding: .utf8)
+
+        let preview = FileOperationService.shared.batchRenamePreview([f1, f2], find: "[0-9]", replace: "", useRegex: true)
+        XCTAssertTrue(preview.allSatisfy(\.isCollision))
+
+        XCTAssertThrowsError(try FileOperationService.shared.batchRename([f1, f2], find: "[0-9]", replace: "", useRegex: true)) { error in
+            guard case FileOperationService.FileOperationError.nameCollision = error else {
+                return XCTFail("Expected nameCollision, got \(error)")
+            }
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: f1.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: f2.path))
+    }
+
+    func testBatchRenamePartialFailureCarriesCompletedRecords() throws {
+        var urls: [URL] = []
+        for i in 1...5 {
+            let url = tempRoot.appendingPathComponent("item\(i).txt")
+            if i != 4 {
+                try "x".write(to: url, atomically: true, encoding: .utf8)
+            }
+            urls.append(url)
+        }
+
+        var completed: [FileOperationService.FileTransferRecord] = []
+        XCTAssertThrowsError(try FileOperationService.shared.batchRename(urls, find: "item", replace: "doc", useRegex: false)) { error in
+            guard case FileOperationService.FileOperationError.partialFailure(let records, _) = error else {
+                return XCTFail("Expected partialFailure, got \(error)")
+            }
+            completed = records
+        }
+
+        XCTAssertEqual(completed.count, 3)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tempRoot.appendingPathComponent("doc1.txt").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tempRoot.appendingPathComponent("doc3.txt").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tempRoot.appendingPathComponent("item5.txt").path))
+
+        try FileOperationService.shared.undoTransferRecords(completed)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tempRoot.appendingPathComponent("item1.txt").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: tempRoot.appendingPathComponent("item3.txt").path))
+    }
+
     func testAvailableDiskCapacityUsesActualFreeVolumeCapacity() throws {
         let values = try tempRoot.resourceValues(forKeys: [
             .volumeAvailableCapacityKey,

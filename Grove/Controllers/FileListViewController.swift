@@ -865,9 +865,10 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
             do {
-                let trashURLs = try FileOperationService.shared.moveToTrash(urls)
-                self?.registerUndoTrash(originalURLs: urls, trashURLs: trashURLs)
+                let records = try FileOperationService.shared.moveToTrashRecords(urls)
+                self?.registerUndoTransfer(records: records, actionName: "Move to Trash")
             } catch {
+                self?.registerUndoForPartialSideEffects(from: error, actionName: "Move to Trash")
                 self?.showError(error)
             }
         }
@@ -956,21 +957,6 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     }
 
     // MARK: - Undo Registration
-
-    private func registerUndoTrash(originalURLs: [URL], trashURLs: [URL]) {
-        guard let undoManager = fileUndoManager else { return }
-        undoManager.registerUndo(withTarget: self) { target in
-            do {
-                for (original, trashURL) in zip(originalURLs, trashURLs) {
-                    let destination = original.deletingLastPathComponent()
-                    _ = try FileOperationService.shared.move([trashURL], to: destination)
-                }
-            } catch {
-                target.showError(error)
-            }
-        }
-        undoManager.setActionName("Move to Trash")
-    }
 
     private func registerUndoMove(originalURLs: [URL], movedURLs: [URL]) {
         guard let undoManager = fileUndoManager else { return }
@@ -1958,7 +1944,8 @@ extension FileListViewController: NSMenuDelegate {
 // MARK: - BatchRenameViewControllerDelegate
 
 extension FileListViewController: BatchRenameViewControllerDelegate {
-    func batchRenameDidComplete() {
+    func batchRenameDidComplete(records: [FileOperationService.FileTransferRecord]) {
+        registerUndoTransfer(records: records, actionName: "Rename")
         reloadContents()
     }
 }
