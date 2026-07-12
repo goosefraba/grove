@@ -354,11 +354,14 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
 
         let item = items[row]
         browserCell.stringValue = item.name
+        browserCell.representedURL = item.url
         let itemURL = item.url
         browserCell.image = ThumbnailCache.shared.iconAsync(for: itemURL) { [weak browser, weak browserCell] icon in
-            guard browserCell?.stringValue == item.name else { return }
-            browserCell?.image = icon
-            browser?.setNeedsDisplay(browser?.bounds ?? .zero)
+            // Match by URL, not filename, so same-named files in different columns don't collide.
+            guard let browserCell, browserCell.representedURL == itemURL else { return }
+            browserCell.image = icon
+            // Invalidate only this cell's rect instead of the whole browser.
+            browser?.setNeedsDisplay(browser?.frame(ofRow: row, inColumn: column) ?? .zero)
         }
         browserCell.isLeaf = !(item.isDirectory && !item.isPackage)
     }
@@ -367,6 +370,10 @@ final class ColumnViewController: NSViewController, FileViewControllerProtocol, 
 // MARK: - BrowserCell
 
 private final class BrowserCell: NSBrowserCell {
+
+    // Identifies the file this (recycled) cell currently represents, so async icon
+    // completions can verify they still apply before drawing.
+    var representedURL: URL?
 
     override init(textCell string: String) {
         super.init(textCell: string)
