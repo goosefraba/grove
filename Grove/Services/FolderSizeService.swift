@@ -62,7 +62,17 @@ final class FolderSizeService {
     }
 
     func invalidateCache(for url: URL) {
-        cache.removeObject(forKey: url.standardizedFileURL as NSURL)
+        // Walk up the full path invalidating every ancestor: a change deep in
+        // A/b/c makes the cached size of A, A/b, ... all stale, not just the
+        // exact URL and its direct parent. removeObject on an absent key is a
+        // no-op, so this stays cheap.
+        var current = url.standardizedFileURL
+        while true {
+            cache.removeObject(forKey: current as NSURL)
+            let parent = current.deletingLastPathComponent().standardizedFileURL
+            if parent == current { break } // reached filesystem root
+            current = parent
+        }
     }
 
     func clearCache() {

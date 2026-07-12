@@ -449,7 +449,6 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         for url in eventURLs {
             ThumbnailCache.shared.invalidate(url)
             FolderSizeService.shared.invalidateCache(for: url)
-            FolderSizeService.shared.invalidateCache(for: url.deletingLastPathComponent())
         }
     }
 
