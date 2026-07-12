@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import CommonCrypto
+import Darwin
 import OSLog
 
 final class FileOperationService {
@@ -98,16 +99,18 @@ final class FileOperationService {
     // MARK: - File Operations
 
     func createNewFolder(in directory: URL, name: String = "untitled folder") throws -> URL {
-        var folderURL = directory.appendingPathComponent(name)
-        var counter = 1
-
-        while fileManager.fileExists(atPath: folderURL.path) {
-            folderURL = directory.appendingPathComponent("\(name) \(counter)")
-            counter += 1
+        // Create-and-catch avoids a TOCTOU race between an existence check and createDirectory.
+        var counter = 0
+        while true {
+            let folderName = counter == 0 ? name : "\(name) \(counter)"
+            let folderURL = directory.appendingPathComponent(folderName)
+            do {
+                try fileManager.createDirectory(at: folderURL, withIntermediateDirectories: false)
+                return folderURL
+            } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileWriteFileExistsError {
+                counter += 1
+            }
         }
-
-        try fileManager.createDirectory(at: folderURL, withIntermediateDirectories: false)
-        return folderURL
     }
 
     func moveToTrash(_ urls: [URL]) throws -> [URL] {
@@ -125,9 +128,7 @@ final class FileOperationService {
     func copy(_ urls: [URL], to destination: URL) throws -> [URL] {
         var copiedURLs: [URL] = []
         for url in urls {
-            let destURL = uniqueDestination(for: url, in: destination)
-            try fileManager.copyItem(at: url, to: destURL)
-            copiedURLs.append(destURL)
+            copiedURLs.append(try transfer(url, toUniqueIn: destination, operation: .copy))
         }
         return copiedURLs
     }
@@ -135,9 +136,7 @@ final class FileOperationService {
     func move(_ urls: [URL], to destination: URL) throws -> [URL] {
         var movedURLs: [URL] = []
         for url in urls {
-            let destURL = uniqueDestination(for: url, in: destination)
-            try fileManager.moveItem(at: url, to: destURL)
-            movedURLs.append(destURL)
+            movedURLs.append(try transfer(url, toUniqueIn: destination, operation: .move))
         }
         return movedURLs
     }
@@ -303,8 +302,7 @@ final class FileOperationService {
             guard operation == .copy else {
                 return []
             }
-            let copyURL = copySuffixDestination(for: url, in: directory)
-            try performTransfer(url, to: copyURL, operation: operation)
+            let copyURL = try transfer(url, toCopySuffixIn: directory, operation: operation)
             return [transferRecord(sourceURL: url, destinationURL: copyURL, operation: operation)]
         }
 
@@ -318,8 +316,7 @@ final class FileOperationService {
         case .skip:
             return []
         case .keepBoth:
-            let uniqueURL = uniqueDestination(for: url, in: directory)
-            try performTransfer(url, to: uniqueURL, operation: operation)
+            let uniqueURL = try transfer(url, toUniqueIn: directory, operation: operation)
             return [transferRecord(sourceURL: url, destinationURL: uniqueURL, operation: operation)]
         case .replace:
             try performReplacingTransfer(url, to: destinationURL, operation: operation)
@@ -332,8 +329,7 @@ final class FileOperationService {
             ]
         case .merge:
             guard conflict.canMerge else {
-                let uniqueURL = uniqueDestination(for: url, in: directory)
-                try performTransfer(url, to: uniqueURL, operation: operation)
+                let uniqueURL = try transfer(url, toUniqueIn: directory, operation: operation)
                 return [transferRecord(sourceURL: url, destinationURL: uniqueURL, operation: operation)]
             }
             return try mergeDirectory(sourceURL: url, into: destinationURL, operation: operation, resolver: resolver)
@@ -423,30 +419,151 @@ final class FileOperationService {
         return values.isDirectory == true && values.isPackage != true
     }
 
-    private func uniqueDestination(for url: URL, in directory: URL) -> URL {
-        let nameParts = fileNameParts(for: url)
-        var destURL = directory.appendingPathComponent(url.lastPathComponent)
-        var counter = 1
-        while fileManager.fileExists(atPath: destURL.path) {
-            let newName = fileName(stem: nameParts.stem, suffix: " \(counter)", fileExtension: nameParts.fileExtension)
-            destURL = directory.appendingPathComponent(newName)
-            counter += 1
+    /// Transfers `url` into `directory` under its own name, appending " N" on collision. The transfer
+    /// itself is attempted for each candidate and retried on an existence error, so there is no TOCTOU
+    /// window between checking a name and using it.
+    private func transfer(_ url: URL, toUniqueIn directory: URL, operation: TransferOperation) throws -> URL {
+        try transferRetryingOnCollision(url, in: directory, operation: operation) { counter in
+            self.uniqueName(for: url, counter: counter)
         }
-        return destURL
     }
 
-    private func copySuffixDestination(for url: URL, in directory: URL) -> URL {
-        let nameParts = fileNameParts(for: url)
-        var counter = 0
+    /// Transfers `url` into `directory` using a "_copy"/"_copy_N" suffix, retrying on collision.
+    private func transfer(_ url: URL, toCopySuffixIn directory: URL, operation: TransferOperation) throws -> URL {
+        try transferRetryingOnCollision(url, in: directory, operation: operation) { counter in
+            self.copySuffixName(for: url, counter: counter)
+        }
+    }
 
+    private func transferRetryingOnCollision(
+        _ url: URL,
+        in directory: URL,
+        operation: TransferOperation,
+        name: (Int) -> String
+    ) throws -> URL {
+        var counter = 0
         while true {
-            let suffix = counter == 0 ? "_copy" : "_copy_\(counter + 1)"
-            let newName = fileName(stem: nameParts.stem, suffix: suffix, fileExtension: nameParts.fileExtension)
-            let destURL = directory.appendingPathComponent(newName)
-            if !fileManager.fileExists(atPath: destURL.path) {
+            let destURL = directory.appendingPathComponent(name(counter))
+            do {
+                try performTransfer(url, to: destURL, operation: operation)
+                return destURL
+            } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileWriteFileExistsError {
+                counter += 1
+            }
+        }
+    }
+
+    private func uniqueName(for url: URL, counter: Int) -> String {
+        guard counter > 0 else { return url.lastPathComponent }
+        let parts = fileNameParts(for: url)
+        return fileName(stem: parts.stem, suffix: " \(counter)", fileExtension: parts.fileExtension)
+    }
+
+    private func copySuffixName(for url: URL, counter: Int) -> String {
+        let parts = fileNameParts(for: url)
+        let suffix = counter == 0 ? "_copy" : "_copy_\(counter + 1)"
+        return fileName(stem: parts.stem, suffix: suffix, fileExtension: parts.fileExtension)
+    }
+
+    private func onSameVolume(_ a: URL, _ b: URL) -> Bool {
+        let volumeA = (try? a.resourceValues(forKeys: [.volumeIdentifierKey]))?.volumeIdentifier
+        let volumeB = (try? b.resourceValues(forKeys: [.volumeIdentifierKey]))?.volumeIdentifier
+        guard let volumeA = volumeA as? NSObject, let volumeB = volumeB as? NSObject else { return false }
+        return volumeA.isEqual(volumeB)
+    }
+
+    private func fraction(_ done: Int64, _ total: Int64) -> Double {
+        total > 0 ? Double(done) / Double(total) : 0
+    }
+
+    /// Total byte size of the given items, summing regular-file sizes recursively for directories.
+    private func byteSize(of urls: [URL]) -> Int64 {
+        urls.reduce(0) { $0 + byteSize(of: $1) }
+    }
+
+    private func byteSize(of url: URL) -> Int64 {
+        let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey])
+        if values?.isDirectory == true {
+            var total: Int64 = 0
+            if let enumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey]) {
+                for case let child as URL in enumerator {
+                    if let childValues = try? child.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+                       childValues.isRegularFile == true {
+                        total += Int64(childValues.fileSize ?? 0)
+                    }
+                }
+            }
+            return total
+        }
+        return Int64(values?.fileSize ?? 0)
+    }
+
+    /// Tracks byte-level progress across a `copyfile(3)` operation.
+    private final class CopyfileProgress {
+        let total: Int64
+        let base: Int64
+        let isCancelled: () -> Bool
+        let report: (Double) -> Void
+        var didCancel = false
+
+        init(total: Int64, base: Int64, isCancelled: @escaping () -> Bool, report: @escaping (Double) -> Void) {
+            self.total = total
+            self.base = base
+            self.isCancelled = isCancelled
+            self.report = report
+        }
+    }
+
+    private struct CancellationSentinel: Error {}
+
+    private static let copyfileProgressCallback: copyfile_callback_t = { what, stage, state, _, _, ctx in
+        guard let ctx = ctx else { return COPYFILE_CONTINUE }
+        let tracker = Unmanaged<CopyfileProgress>.fromOpaque(ctx).takeUnretainedValue()
+        if tracker.isCancelled() {
+            tracker.didCancel = true
+            return COPYFILE_QUIT
+        }
+        if what == COPYFILE_COPY_DATA, stage == COPYFILE_PROGRESS || stage == COPYFILE_FINISH {
+            var copied = off_t(0)
+            copyfile_state_get(state, UInt32(COPYFILE_STATE_COPIED), &copied)
+            let done = min(tracker.base + Int64(copied), tracker.total)
+            tracker.report(tracker.total > 0 ? Double(done) / Double(tracker.total) : 0)
+        }
+        return COPYFILE_CONTINUE
+    }
+
+    /// Copies `source` into `directory` (unique name, retrying on collision) using `copyfile(3)` with a
+    /// byte-level progress callback so large single-file copies advance smoothly instead of jumping from
+    /// 0% to done. Preserves metadata via COPYFILE_ALL. Cleans up a partial destination on cancel/error.
+    private func copyItemWithProgress(_ source: URL, toUniqueIn directory: URL, tracker: CopyfileProgress) throws -> URL {
+        let state = copyfile_state_alloc()
+        defer { copyfile_state_free(state) }
+        copyfile_state_set(state, UInt32(COPYFILE_STATE_STATUS_CB), unsafeBitCast(Self.copyfileProgressCallback, to: UnsafeRawPointer.self))
+        copyfile_state_set(state, UInt32(COPYFILE_STATE_STATUS_CTX), Unmanaged.passUnretained(tracker).toOpaque())
+
+        let flags = copyfile_flags_t(UInt32(bitPattern: COPYFILE_ALL | COPYFILE_RECURSIVE | COPYFILE_EXCL))
+        var counter = 0
+        while true {
+            let destURL = directory.appendingPathComponent(uniqueName(for: source, counter: counter))
+            let result = source.path.withCString { src in
+                destURL.path.withCString { dst in
+                    copyfile(src, dst, state, flags)
+                }
+            }
+            if result == 0 {
                 return destURL
             }
-            counter += 1
+            let err = errno
+            if tracker.didCancel {
+                try? fileManager.removeItem(at: destURL)
+                throw CancellationSentinel()
+            }
+            if err == EEXIST {
+                counter += 1
+                continue
+            }
+            try? fileManager.removeItem(at: destURL)
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(err), userInfo: [NSLocalizedDescriptionKey: String(cString: strerror(err))])
         }
     }
 
@@ -492,8 +609,7 @@ final class FileOperationService {
                 let originalDirectory = record.sourceURL.deletingLastPathComponent()
                 try fileManager.createDirectory(at: originalDirectory, withIntermediateDirectories: true)
                 if fileManager.fileExists(atPath: record.sourceURL.path) {
-                    let fallbackURL = uniqueDestination(for: record.sourceURL, in: originalDirectory)
-                    try fileManager.moveItem(at: record.destinationURL, to: fallbackURL)
+                    _ = try transfer(record.destinationURL, toUniqueIn: originalDirectory, operation: .move)
                 } else {
                     try fileManager.moveItem(at: record.destinationURL, to: record.sourceURL)
                 }
