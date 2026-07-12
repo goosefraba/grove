@@ -3,6 +3,9 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     private var windowControllers: [BrowserWindowController] = []
+    // States of browser windows closed since the last fresh session start.
+    // Lets us restore the full last session when the user closes every window before quitting.
+    private var closedWindowStates: [[String: Any]] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMainMenu()
@@ -46,6 +49,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     // MARK: - Window Management
 
     @objc func newWindow(_ sender: Any?) {
+        // Opening a window into an empty app starts a fresh session; forget prior closes.
+        if windowControllers.isEmpty {
+            closedWindowStates.removeAll()
+        }
         let wc = BrowserWindowController()
         wc.showWindow(nil)
         windowControllers.append(wc)
@@ -75,16 +82,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     @objc private func windowDidClose(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow else { return }
-        windowControllers.removeAll { $0.window === window }
-        saveWindowStates()
+        // Only react to tracked browser windows; ignore panels, sheets, etc.
+        guard let window = notification.object as? NSWindow,
+              let index = windowControllers.firstIndex(where: { $0.window === window }) else { return }
+        // Capture the closing window's state so the full session can be restored even
+        // if every window is closed before the app quits. Persistence happens on terminate.
+        closedWindowStates.append(windowControllers[index].saveState())
+        windowControllers.remove(at: index)
     }
 
     // MARK: - Window State Save/Restore
 
     private func saveWindowStates() {
         windowControllers.removeAll { $0.window == nil }
-        let states = windowControllers.map { $0.saveState() }
+        // Prefer the currently-open windows; if none are open (user closed all before
+        // quitting), fall back to the states captured as they closed. Never persist empty.
+        let states = windowControllers.isEmpty
+            ? closedWindowStates
+            : windowControllers.map { $0.saveState() }
+        guard !states.isEmpty else { return }
         UserDefaults.standard.set(states, forKey: BrowserWindowController.windowStatesKey)
     }
 
