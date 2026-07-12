@@ -13,12 +13,9 @@ SCHEME="Grove"
 PROJECT_FILE="Grove.xcodeproj"
 CONFIGURATION="Release"
 ENTITLEMENTS_FILE="Grove/Resources/Grove.entitlements"
-RELEASE_ROOT="/tmp/grove-macos-release"
-DERIVED_DATA_PATH="$RELEASE_ROOT/DerivedData"
 INSTALL_ROOT="${GROVE_MACOS_INSTALL_DIR:-/Applications}"
 LOCAL_ENV_FILE=".grove.env"
 RELEASE_ENV_FILE="release.env"
-SHARED_NOTARY_ENV_FILE="../namodb/.tauri.env"
 LAUNCH_SERVICES_REGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 RED='\033[0;31m'
@@ -58,7 +55,7 @@ Usage: ./scripts/release_macos.sh [options]
 
 Options:
   --check        Run preflight checks only
-  --skip-build   Reuse the existing release build in /tmp/grove-macos-release
+  --skip-build   Reuse the existing release build in .build/macos-release
   --notarize     Submit the signed app archive to Apple notarization
   --install      Install the signed app bundle
   --launch       Install and launch the signed app bundle
@@ -74,7 +71,12 @@ done
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-for env_file in "$SHARED_NOTARY_ENV_FILE" "$RELEASE_ENV_FILE" "$LOCAL_ENV_FILE"; do
+# Repo-local build dir (git-ignored via .build/): avoids /tmp collisions between
+# concurrent runs/checkouts while keeping a stable path for --skip-build reuse.
+RELEASE_ROOT="$REPO_ROOT/.build/macos-release"
+DERIVED_DATA_PATH="$RELEASE_ROOT/DerivedData"
+
+for env_file in "$RELEASE_ENV_FILE" "$LOCAL_ENV_FILE"; do
   if [[ -f "$env_file" ]]; then
     set -a
     # shellcheck disable=SC1090
@@ -219,7 +221,19 @@ ditto "$BUILT_APP" "$APP_BUNDLE"
 success "Prepared $APP_BUNDLE"
 
 step "Signing app bundle"
-codesign --force --deep --timestamp --options runtime \
+# Sign inside-out (Apple best practice), not --deep: nested code first with its
+# own signature, then the outer bundle. --deep is discouraged because it re-signs
+# nested items with the outer identity/entitlements and in the wrong order once
+# helpers or resource bundles are added.
+while IFS= read -r -d '' nested; do
+  codesign --force --timestamp --options runtime \
+    --sign "$SIGNING_IDENTITY" "$nested"
+done < <(find "$APP_BUNDLE/Contents/Frameworks" "$APP_BUNDLE/Contents/PlugIns" \
+  -mindepth 1 -maxdepth 1 \
+  \( -name '*.framework' -o -name '*.dylib' -o -name '*.bundle' -o -name '*.appex' \) \
+  -print0 2>/dev/null)
+
+codesign --force --timestamp --options runtime \
   --entitlements "$ENTITLEMENTS_FILE" \
   --sign "$SIGNING_IDENTITY" \
   "$APP_BUNDLE"
