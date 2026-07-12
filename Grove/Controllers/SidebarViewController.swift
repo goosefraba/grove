@@ -587,11 +587,21 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
               let mountedVolume = sidebarItem.mountedVolume,
               mountedVolume.supportsEject else { return }
 
-        do {
-            try NSWorkspace.shared.unmountAndEjectDevice(at: mountedVolume.url)
-            scheduleVolumeRefresh()
-        } catch {
-            showVolumeEjectError(error, volumeName: mountedVolume.displayName)
+        // Unmount can block for a long time on busy or network volumes; run it off the
+        // main thread so the UI stays responsive and report results back on main (#46).
+        let url = mountedVolume.url
+        let volumeName = mountedVolume.displayName
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try NSWorkspace.shared.unmountAndEjectDevice(at: url)
+                DispatchQueue.main.async { [weak self] in
+                    self?.scheduleVolumeRefresh()
+                }
+            } catch {
+                DispatchQueue.main.async { [weak self] in
+                    self?.showVolumeEjectError(error, volumeName: volumeName)
+                }
+            }
         }
     }
 
