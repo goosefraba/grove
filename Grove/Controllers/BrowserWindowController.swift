@@ -538,6 +538,20 @@ extension BrowserWindowController: BrowserWindowFileDropDelegate {
         undoManager.registerUndo(withTarget: self) { target in
             do {
                 try FileOperationService.shared.undoTransferRecords(undoableRecords)
+                target.registerRedoTransfer(records: undoableRecords, actionName: actionName)
+            } catch {
+                target.showError(error)
+            }
+        }
+        undoManager.setActionName(actionName)
+    }
+
+    private func registerRedoTransfer(records: [FileOperationService.FileTransferRecord], actionName: String) {
+        guard let undoManager = window?.undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { target in
+            do {
+                try FileOperationService.shared.redoTransferRecords(records)
+                target.registerUndoTransfer(records: records, actionName: actionName)
             } catch {
                 target.showError(error)
             }

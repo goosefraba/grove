@@ -217,6 +217,37 @@ final class FileOperationServiceTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: tempRoot.appendingPathComponent("item3.txt").path))
     }
 
+    func testRedoTransferRecordsReappliesCopyAndMove() throws {
+        // Copy record: source is preserved, destination is recreated on redo.
+        let copySource = tempRoot.appendingPathComponent("c.txt")
+        try "x".write(to: copySource, atomically: true, encoding: .utf8)
+        let sub = tempRoot.appendingPathComponent("sub", isDirectory: true)
+        try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
+        let copyDest = sub.appendingPathComponent("c.txt")
+        try FileManager.default.copyItem(at: copySource, to: copyDest)
+        let copyRecord = FileOperationService.FileTransferRecord(sourceURL: copySource, destinationURL: copyDest, undoBehavior: .trashDestination)
+
+        try FileOperationService.shared.undoTransferRecords([copyRecord])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: copyDest.path))
+        try FileOperationService.shared.redoTransferRecords([copyRecord])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: copyDest.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: copySource.path))
+
+        // Move record: undo returns to source, redo moves back to destination.
+        let moveSource = tempRoot.appendingPathComponent("m.txt")
+        try "y".write(to: moveSource, atomically: true, encoding: .utf8)
+        let moveDest = tempRoot.appendingPathComponent("moved.txt")
+        try FileManager.default.moveItem(at: moveSource, to: moveDest)
+        let moveRecord = FileOperationService.FileTransferRecord(sourceURL: moveSource, destinationURL: moveDest, undoBehavior: .moveBackToSource)
+
+        try FileOperationService.shared.undoTransferRecords([moveRecord])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: moveSource.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: moveDest.path))
+        try FileOperationService.shared.redoTransferRecords([moveRecord])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: moveDest.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: moveSource.path))
+    }
+
     func testAvailableDiskCapacityUsesActualFreeVolumeCapacity() throws {
         let values = try tempRoot.resourceValues(forKeys: [
             .volumeAvailableCapacityKey,
