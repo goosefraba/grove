@@ -669,24 +669,45 @@ final class FileOperationService {
     }
 
     private func extractArchive(_ archiveURL: URL, to destinationDir: URL, password: String?) throws {
-        var args = ["-x", "-k"]
         if let password = password, !password.isEmpty {
-            args += ["--password", password]
+            // ditto's --password takes no argument and only prompts interactively, so it cannot decrypt
+            // programmatically. Use unzip -P, which accepts the password via the API. Wrong passwords
+            // exit non-zero with a message instead of hanging on a prompt.
+            try runArchiveTool(
+                "/usr/bin/unzip",
+                arguments: ["-o", "-P", password, archiveURL.path, "-d", destinationDir.path],
+                errorDomain: "com.grove.decompress",
+                fallbackMessage: "Decompression failed"
+            )
+        } else {
+            try runArchiveTool(
+                "/usr/bin/ditto",
+                arguments: ["-x", "-k", archiveURL.path, destinationDir.path],
+                errorDomain: "com.grove.decompress",
+                fallbackMessage: "Decompression failed"
+            )
         }
-        args += [archiveURL.path, destinationDir.path]
+    }
 
+    /// Runs an external archiving tool, draining stderr concurrently with execution. Reading stderr to
+    /// EOF *before* `waitUntilExit()` prevents a deadlock when the child writes more than the pipe buffer
+    /// (~64KB) can hold. Throws with the collected stderr text on non-zero exit.
+    func runArchiveTool(_ executablePath: String, arguments: [String], currentDirectory: URL? = nil, errorDomain: String, fallbackMessage: String) throws {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        process.arguments = args
+        process.executableURL = URL(fileURLWithPath: executablePath)
+        process.arguments = arguments
+        if let currentDirectory { process.currentDirectoryURL = currentDirectory }
         let errorPipe = Pipe()
         process.standardError = errorPipe
+
         try process.run()
+        // readDataToEndOfFile drains the pipe as the process writes, returning at EOF (child exit).
+        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
 
         if process.terminationStatus != 0 {
-            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            let message = String(data: errorData, encoding: .utf8) ?? "Decompression failed"
-            throw NSError(domain: "com.grove.decompress", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: message])
+            let message = String(data: errorData, encoding: .utf8).flatMap { $0.isEmpty ? nil : $0 } ?? fallbackMessage
+            throw NSError(domain: errorDomain, code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: message])
         }
     }
 
@@ -715,37 +736,51 @@ final class FileOperationService {
                 try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
                 defer { try? FileManager.default.removeItem(at: tempDir) }
 
-                // Stage files into temp directory so ditto archives them by name
+                // Stage sources into the temp directory so the archive members are named by their leaf
+                // name. Hard-link on the same volume (instant, no extra disk) and fall back to a copy
+                // across volumes, instead of always doubling disk usage with a full copy.
                 for url in urls {
                     let dest = tempDir.appendingPathComponent(url.lastPathComponent)
-                    try FileManager.default.copyItem(at: url, to: dest)
+                    try self.stageForArchiving(url, to: dest)
                 }
 
-                var args = ["-c", "-k"]
                 if let password = password, !password.isEmpty {
-                    args += ["--password", password]
-                }
-                args += ["--zlibCompressionLevel", "\(level.rawValue)"]
-                args += [tempDir.path, archiveURL.path]
-
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-                process.arguments = args
-                let errorPipe = Pipe()
-                process.standardError = errorPipe
-                try process.run()
-                process.waitUntilExit()
-
-                if process.terminationStatus != 0 {
-                    let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-                    let message = String(data: errorData, encoding: .utf8) ?? "Compression failed"
-                    throw NSError(domain: "com.grove.compress", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: message])
+                    // ditto's --password cannot encrypt programmatically (see extractArchive). Use zip -P,
+                    // run inside the staging directory so members are stored with root-level relative names.
+                    let members = try FileManager.default.contentsOfDirectory(atPath: tempDir.path)
+                    let args = ["-r", "-q", "-P", password, "-\(level.rawValue)", archiveURL.path] + members
+                    try self.runArchiveTool(
+                        "/usr/bin/zip",
+                        arguments: args,
+                        currentDirectory: tempDir,
+                        errorDomain: "com.grove.compress",
+                        fallbackMessage: "Compression failed"
+                    )
+                } else {
+                    let args = ["-c", "-k", "--zlibCompressionLevel", "\(level.rawValue)", tempDir.path, archiveURL.path]
+                    try self.runArchiveTool(
+                        "/usr/bin/ditto",
+                        arguments: args,
+                        errorDomain: "com.grove.compress",
+                        fallbackMessage: "Compression failed"
+                    )
                 }
 
                 DispatchQueue.main.async { completion(.success(archiveURL)) }
             } catch {
                 DispatchQueue.main.async { completion(.failure(error)) }
             }
+        }
+    }
+
+    /// Stages a source into the archive temp directory as cheaply as possible: a hard link on the same
+    /// volume (instant, zero extra bytes) with a full copy fallback for cross-volume sources.
+    private func stageForArchiving(_ source: URL, to destination: URL) throws {
+        do {
+            try fileManager.linkItem(at: source, to: destination)
+        } catch {
+            try? fileManager.removeItem(at: destination)
+            try fileManager.copyItem(at: source, to: destination)
         }
     }
 
