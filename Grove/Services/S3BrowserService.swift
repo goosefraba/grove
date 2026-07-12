@@ -665,7 +665,7 @@ final class S3BrowserService {
         var candidate = directory.appendingPathComponent(fileName, isDirectory: false)
         var index = 2
         while fileManager.fileExists(atPath: candidate.path) {
-            let suffix = " copy" + (index == 2 ? "" : " \(index)")
+            let suffix = " copy" + (index == 2 ? "" : " \(index - 1)")
             let nextName = ext.isEmpty ? "\(base)\(suffix)" : "\(base)\(suffix).\(ext)"
             candidate = directory.appendingPathComponent(nextName, isDirectory: false)
             index += 1

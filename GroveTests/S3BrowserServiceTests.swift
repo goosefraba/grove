@@ -318,6 +318,31 @@ final class S3BrowserServiceTests: XCTestCase {
         XCTAssertFalse(guarder.isCurrent(first))
         XCTAssertTrue(guarder.isCurrent(second))
     }
+
+    func testDownloadCopySuffixSequenceIsContiguous() async throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("existing".utf8).write(to: directory.appendingPathComponent("app.log"))
+
+        let item = objectItem(name: "app.log", key: "logs/app.log", size: 7)
+        let gateway = MockS3Gateway()
+        gateway.bucketRegionHandler = { _, _, _ in "us-east-1" }
+        gateway.downloadObjectHandler = { request, _ in
+            let data = Data("newdata".utf8)
+            try data.write(to: request.temporaryURL)
+            return S3DownloadResponse(bytesWritten: Int64(data.count))
+        }
+
+        let service = S3BrowserService(gateway: gateway)
+        var names: [String] = []
+        for _ in 0..<3 {
+            let results = try await service.download(items: [item], to: .directory(directory), profile: profile)
+            names.append(try XCTUnwrap(results.first?.destinationURL.lastPathComponent))
+        }
+
+        XCTAssertEqual(names, ["app copy.log", "app copy 2.log", "app copy 3.log"])
+    }
+
 }
 
 private final class MockS3Gateway: S3Gateway {
