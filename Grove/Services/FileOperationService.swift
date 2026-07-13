@@ -398,7 +398,16 @@ final class FileOperationService {
 
         let stagedURL = stagingDir.appendingPathComponent(destinationURL.lastPathComponent)
         try performTransfer(sourceURL, to: stagedURL, operation: operation)
-        try fileManager.replaceItem(at: destinationURL, withItemAt: stagedURL, backupItemName: nil, options: [], resultingItemURL: nil)
+        do {
+            try fileManager.replaceItem(at: destinationURL, withItemAt: stagedURL, backupItemName: nil, options: [], resultingItemURL: nil)
+        } catch {
+            // A failed move already relocated the source into staging; the defer would delete it with the
+            // rest of the staging dir, destroying the user's only copy. Restore it before rethrowing.
+            if operation == .move {
+                try? fileManager.moveItem(at: stagedURL, to: sourceURL)
+            }
+            throw error
+        }
     }
 
     private func mergeDirectory(
