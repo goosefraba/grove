@@ -131,15 +131,16 @@ final class DualPaneViewController: NSViewController {
         rightContainer.layer?.borderWidth = (activePane === rightPane) ? 1 : 0
     }
 
-    override func keyDown(with event: NSEvent) {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        // Cmd+Option+Left / Cmd+Option+Right toggle the active pane. Tab is left
-        // to the focused table view for intra-pane keyboard navigation.
+        // Cmd+Option+Left / Cmd+Option+Right toggle the active pane. Command-modified
+        // keys are dispatched as key equivalents and never reach keyDown, so handle
+        // them here. Tab is left to the focused table view for intra-pane navigation.
         if mods == [.command, .option], event.keyCode == 123 || event.keyCode == 124 {
             switchActivePane()
-            return
+            return true
         }
-        super.keyDown(with: event)
+        return super.performKeyEquivalent(with: event)
     }
 }
 
