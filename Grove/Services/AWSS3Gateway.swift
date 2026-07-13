@@ -24,11 +24,12 @@ final class AWSS3Gateway: S3Gateway {
     private let profileStore: AWSProfileStore
     private var clients: [ClientKey: S3Client] = [:]
     private var ssoClients: [ClientKey: CachedSSOClient] = [:]
-    private lazy var ssoCredentialProvider = NoRefreshSSOCredentialProvider(profileStore: profileStore)
+    private let ssoCredentialProvider: NoRefreshSSOCredentialProvider
     private let lock = NSLock()
 
     init(profileStore: AWSProfileStore = AWSProfileStore()) {
         self.profileStore = profileStore
+        self.ssoCredentialProvider = NoRefreshSSOCredentialProvider(profileStore: profileStore)
     }
 
     func listBuckets(profile: AWSProfile, region: String?) async throws -> [S3BucketSummary] {
