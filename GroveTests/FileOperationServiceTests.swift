@@ -177,7 +177,7 @@ final class FileOperationServiceTests: XCTestCase {
         try "a".write(to: f1, atomically: true, encoding: .utf8)
         try "b".write(to: f2, atomically: true, encoding: .utf8)
 
-        let preview = FileOperationService.shared.batchRenamePreview([f1, f2], find: "[0-9]", replace: "", useRegex: true)
+        let preview = try FileOperationService.shared.batchRenamePreview([f1, f2], find: "[0-9]", replace: "", useRegex: true)
         XCTAssertTrue(preview.allSatisfy(\.isCollision))
 
         XCTAssertThrowsError(try FileOperationService.shared.batchRename([f1, f2], find: "[0-9]", replace: "", useRegex: true)) { error in

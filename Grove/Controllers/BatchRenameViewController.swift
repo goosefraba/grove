@@ -151,7 +151,7 @@ final class BatchRenameViewController: NSViewController {
         let replace = replaceField.stringValue
         let useRegex = regexCheckbox.state == .on
 
-        previewEntries = FileOperationService.shared.batchRenamePreview(urls, find: find, replace: replace, useRegex: useRegex)
+        previewEntries = (try? FileOperationService.shared.batchRenamePreview(urls, find: find, replace: replace, useRegex: useRegex)) ?? []
         previewTable.reloadData()
 
         let hasChanges = previewEntries.contains(where: \.isChanged)
