@@ -201,7 +201,7 @@ final class PreviewPaneController: NSViewController {
         hideAll()
         scrollView.isHidden = false
 
-        loadInBackground(item, work: {
+        loadInBackground(item, work: { () -> String? in
             // Limit reading to 1 MB
             guard let data = try? Data(contentsOf: item.url, options: [.mappedIfSafe]),
                   data.count < 1_048_576 else {
@@ -231,42 +231,100 @@ final class PreviewPaneController: NSViewController {
         })
     }
 
+    /// Renders markdown using Foundation's native parser so headings (all levels),
+    /// bold/italic, links, inline code, and fenced code blocks are all handled.
+    /// The parser stores block structure in `presentationIntent` rather than raw
+    /// newlines, so we walk the runs and re-insert separators between blocks.
     private func renderMarkdown(_ content: String) -> NSAttributedString {
+        let baseSize: CGFloat = 13
+        let baseFont = NSFont.systemFont(ofSize: baseSize)
+        let codeFont = NSFont.monospacedSystemFont(ofSize: baseSize - 1, weight: .regular)
+
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .full,
+            failurePolicy: .returnPartiallyParsedIfPossible
+        )
+        guard let attributed = try? AttributedString(markdown: content, options: options) else {
+            return NSAttributedString(string: content, attributes: [
+                .font: baseFont,
+                .foregroundColor: NSColor.labelColor,
+            ])
+        }
+
         let result = NSMutableAttributedString()
-        let defaultFont = NSFont.systemFont(ofSize: 13)
-        let defaultColor = NSColor.labelColor
-        let defaultAttrs: [NSAttributedString.Key: Any] = [.font: defaultFont, .foregroundColor: defaultColor]
+        var previousIntent: PresentationIntent?
+        var isFirst = true
 
-        let codeFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        var insideFence = false
+        for run in attributed.runs {
+            let intent = run.presentationIntent
 
-        for line in content.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            var attrs = defaultAttrs
-
-            if trimmed.hasPrefix("```") {
-                // Fence marker: monospace it and toggle the code-block state.
-                attrs[.font] = codeFont
-                attrs[.foregroundColor] = NSColor.secondaryLabelColor
-                insideFence.toggle()
-            } else if insideFence {
-                // Content inside a fenced block: monospace every line, not just the fences.
-                attrs[.font] = codeFont
-                attrs[.foregroundColor] = NSColor.secondaryLabelColor
-            } else if trimmed.hasPrefix("# ") {
-                attrs[.font] = NSFont.systemFont(ofSize: 22, weight: .bold)
-            } else if trimmed.hasPrefix("## ") {
-                attrs[.font] = NSFont.systemFont(ofSize: 18, weight: .bold)
-            } else if trimmed.hasPrefix("### ") {
-                attrs[.font] = NSFont.systemFont(ofSize: 15, weight: .semibold)
-            } else if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
-                // Keep default
+            // Re-insert the block separators the parser stripped.
+            if !isFirst && intent != previousIntent {
+                let bothCode = isCodeBlock(intent) && isCodeBlock(previousIntent)
+                let separator = bothCode ? "\n" : "\n\n"
+                result.append(NSAttributedString(string: separator, attributes: [.font: baseFont]))
             }
 
-            result.append(NSAttributedString(string: line + "\n", attributes: attrs))
+            var font = baseFont
+            var color = NSColor.labelColor
+            var isCode = false
+            var headerLevel = 0
+
+            for component in intent?.components ?? [] {
+                switch component.kind {
+                case .header(let level):
+                    headerLevel = level
+                case .codeBlock:
+                    isCode = true
+                default:
+                    break
+                }
+            }
+
+            let inline = run.inlinePresentationIntent ?? []
+            if inline.contains(.code) { isCode = true }
+
+            if isCode {
+                font = codeFont
+                color = .secondaryLabelColor
+            } else if headerLevel > 0 {
+                let size: CGFloat
+                switch headerLevel {
+                case 1: size = 22
+                case 2: size = 18
+                case 3: size = 15
+                default: size = 14
+                }
+                font = NSFont.systemFont(ofSize: size, weight: headerLevel >= 3 ? .semibold : .bold)
+            } else {
+                var traits: NSFontDescriptor.SymbolicTraits = []
+                if inline.contains(.stronglyEmphasized) { traits.insert(.bold) }
+                if inline.contains(.emphasized) { traits.insert(.italic) }
+                if !traits.isEmpty {
+                    font = NSFont(descriptor: baseFont.fontDescriptor.withSymbolicTraits(traits), size: baseSize) ?? baseFont
+                }
+            }
+
+            var attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
+            if let link = run.link {
+                attrs[.link] = link
+                attrs[.foregroundColor] = NSColor.linkColor
+                attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue
+            }
+
+            result.append(NSAttributedString(string: String(attributed[run.range].characters), attributes: attrs))
+            previousIntent = intent
+            isFirst = false
         }
 
         return result
+    }
+
+    private func isCodeBlock(_ intent: PresentationIntent?) -> Bool {
+        intent?.components.contains { component in
+            if case .codeBlock = component.kind { return true }
+            return false
+        } ?? false
     }
 
     private func showImage(_ item: FileItem) {
