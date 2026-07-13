@@ -110,13 +110,21 @@ enum PathCopyFormatter {
     /// `//[user@]server/share/sub` into its server and top-level share.
     private static func parseSMBMount(_ mountFromName: String) -> (server: String, share: String)? {
         var remainder = mountFromName
+        var hadScheme = false
         for scheme in ["smb://", "cifs://"] {
             if remainder.lowercased().hasPrefix(scheme) {
                 remainder = String(remainder.dropFirst(scheme.count))
+                hadScheme = true
+                break
             }
         }
-        guard remainder.hasPrefix("//") else { return nil }
-        remainder = String(remainder.dropFirst(2))
+        // A stripped scheme leaves "server/share" directly; only genuine "//server/share"
+        // sources (no scheme) must still carry the leading "//".
+        if remainder.hasPrefix("//") {
+            remainder = String(remainder.dropFirst(2))
+        } else if !hadScheme {
+            return nil
+        }
 
         let segments = remainder.split(separator: "/", omittingEmptySubsequences: true)
         guard segments.count >= 2 else { return nil }
