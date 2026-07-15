@@ -27,9 +27,10 @@ final class BrowserCapabilityTests: XCTestCase {
         XCTAssertTrue(capabilities.contains(.quickLook))
     }
 
-    func testFileDropOperationDefaultsToCopyWhenSourceAllowsCopyAndMove() {
-        XCTAssertEqual(FileDropOperationResolver.preferredOperation(from: [.copy, .move]), .copy)
+    func testFileDropOperationPrefersMoveWhenSourceAllowsCopyAndMove() {
+        XCTAssertEqual(FileDropOperationResolver.preferredOperation(from: [.copy, .move]), .move)
         XCTAssertEqual(FileDropOperationResolver.preferredOperation(from: [.move]), .move)
+        XCTAssertEqual(FileDropOperationResolver.preferredOperation(from: [.copy]), .copy)
     }
 
     func testTerminalChangeDirectoryScriptShellQuotesPath() {

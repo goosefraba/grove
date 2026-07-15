@@ -137,11 +137,11 @@ final class LocalFooterDiskSpaceCache {
 
 enum FileDropOperationResolver {
     static func preferredOperation(from sourceMask: NSDragOperation) -> NSDragOperation {
-        if sourceMask.contains(.copy) {
-            return .copy
-        }
         if sourceMask.contains(.move) {
             return .move
+        }
+        if sourceMask.contains(.copy) {
+            return .copy
         }
         return []
     }
