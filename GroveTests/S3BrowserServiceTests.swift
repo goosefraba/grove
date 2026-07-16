@@ -70,6 +70,28 @@ final class S3BrowserServiceTests: XCTestCase {
         XCTAssertEqual(items.first?.location, S3Location(profileName: "ops", regionOverride: "eu-west-1", bucket: "alpha", prefix: ""))
     }
 
+    func testBucketItemsCanBeFilteredByPartialNameCaseInsensitively() {
+        let buckets = [
+            S3BucketSummary(name: "appointmed-archive", creationDate: nil),
+            S3BucketSummary(name: "cdk-invoice-inbound", creationDate: nil),
+            S3BucketSummary(name: "CDK-assets", creationDate: nil),
+        ]
+        let items = S3BrowserViewController.bucketItems(from: buckets, profileName: "ops", region: "eu-central-1")
+
+        XCTAssertEqual(S3BrowserViewController.filteredBucketItems(items, query: "cdk").map(\.name), ["CDK-assets", "cdk-invoice-inbound"])
+        XCTAssertEqual(S3BrowserViewController.filteredBucketItems(items, query: " invoice ").map(\.name), ["cdk-invoice-inbound"])
+        XCTAssertEqual(S3BrowserViewController.filteredBucketItems(items, query: "").count, 3)
+    }
+
+    func testInlineErrorsDoNotExposeVerboseProviderPayloads() {
+        let payload = String(repeating: "AWSClientRuntime.UnknownAWSHTTPServiceError ", count: 30)
+        let error = S3BrowserError.wrongRegion(expected: "us-east-1", actual: "eu-central-1", message: payload)
+
+        XCTAssertEqual(error.inlineDescription, "Bucket region mismatch: the bucket is in eu-central-1, not us-east-1.")
+        XCTAssertFalse(error.inlineDescription.contains("AWSClientRuntime"))
+        XCTAssertTrue(error.localizedDescription.contains("AWSClientRuntime"))
+    }
+
     func testAccessDeniedAndExpiredCredentialsAreClassified() async {
         XCTAssertTrue(S3BrowserError.classify(MockS3Error("AccessDenied: missing ListBucket")).isAccessDenied)
         XCTAssertTrue(S3BrowserError.classify(MockS3Error("ExpiredToken: token expired")).isCredentialProblem)

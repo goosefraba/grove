@@ -239,6 +239,35 @@ enum S3BrowserError: LocalizedError, Equatable {
         return false
     }
 
+    /// A short message suitable for Grove's inline status and empty-state UI.
+    /// The full provider response remains available through `localizedDescription`
+    /// and the S3 error details sheet.
+    var inlineDescription: String {
+        switch self {
+        case .noProfiles, .noProfileSelected, .noBucketSelected, .missingRegion,
+             .noSuchBucket, .noSuchObject, .cancelled:
+            return localizedDescription
+        case .credentials:
+            return "AWS credentials are missing, expired, or invalid."
+        case .accessDenied:
+            return "Access denied while contacting Amazon S3."
+        case .wrongRegion(let expected, let actual, _):
+            if let actual, let expected, actual != expected {
+                return "Bucket region mismatch: the bucket is in \(actual), not \(expected)."
+            }
+            if let actual {
+                return "Bucket region mismatch: the bucket is in \(actual)."
+            }
+            return "The bucket belongs to a different AWS region."
+        case .network:
+            return "Grove could not reach Amazon S3. Check the network connection and retry."
+        case .permission:
+            return "Amazon S3 did not allow this request. Open Details for more information."
+        case .unknown:
+            return "Amazon S3 could not complete the request. Open Details for more information."
+        }
+    }
+
     static func classify(_ error: Error, bucket: String? = nil, requestedRegion: String? = nil) -> S3BrowserError {
         if error is CancellationError {
             return .cancelled

@@ -34,7 +34,7 @@ struct S3ContextMenuItemDescriptor: Equatable {
     let isEnabled: Bool
 }
 
-final class S3BrowserViewController: NSViewController, FileViewControllerProtocol, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate, NSComboBoxDelegate {
+final class S3BrowserViewController: NSViewController, FileViewControllerProtocol, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate, NSComboBoxDelegate, NSSearchFieldDelegate {
     weak var delegate: FileListViewControllerDelegate?
 
     private let profileStore: AWSProfileStore
@@ -46,7 +46,7 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
     private let locationSummaryLabel = NSTextField(labelWithString: "")
     private let profileComboBox = NSComboBox()
     private let regionComboBox = NSComboBox()
-    private let bucketField = NSTextField()
+    private let bucketField = NSSearchField()
     private let browseButton = NSButton(title: "Open", target: nil, action: nil)
     private let uploadButton = NSButton(title: "Upload...", target: nil, action: nil)
     private let downloadButton = NSButton(title: "Download...", target: nil, action: nil)
@@ -61,6 +61,7 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
 
     private var profiles: [AWSProfile] = []
     private var items: [S3Item] = []
+    private var allBucketItems: [S3Item] = []
     private var loadTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
     private var transferTask: Task<Void, Never>?
@@ -69,6 +70,7 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
     private var nextContinuationToken: String?
     private var suppressControlActions = false
     private var isLoading = false
+    private var bucketListingUnavailable = false
 
     private(set) var s3Location = S3Location()
     private let nameColumn = NSUserInterfaceItemIdentifier("S3NameColumn")
@@ -186,10 +188,11 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         regionComboBox.action = #selector(regionChanged(_:))
         regionComboBox.widthAnchor.constraint(equalToConstant: 135).isActive = true
 
-        bucketField.placeholderString = "Bucket"
+        bucketField.placeholderString = "Filter buckets"
         bucketField.font = .systemFont(ofSize: GroveUI.contentFontSize)
+        bucketField.delegate = self
         bucketField.target = self
-        bucketField.action = #selector(browseRequested(_:))
+        bucketField.action = #selector(bucketFilterSubmitted(_:))
         bucketField.widthAnchor.constraint(equalToConstant: 210).isActive = true
 
         browseButton.target = self
@@ -223,6 +226,8 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         statusLabel.font = .systemFont(ofSize: GroveUI.statusFontSize)
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.lineBreakMode = .byTruncatingTail
+        statusLabel.maximumNumberOfLines = 1
+        statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         loadingSpinner.style = .spinning
         loadingSpinner.controlSize = .small
@@ -348,6 +353,9 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         emptyLabel.font = .systemFont(ofSize: GroveUI.emptyFontSize)
         emptyLabel.textColor = .secondaryLabelColor
         emptyLabel.alignment = .center
+        emptyLabel.lineBreakMode = .byTruncatingTail
+        emptyLabel.maximumNumberOfLines = 2
+        emptyLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
         emptyLabel.isHidden = true
 
@@ -381,6 +389,7 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
             emptyLabel.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
             emptyLabel.leadingAnchor.constraint(greaterThanOrEqualTo: scrollView.leadingAnchor, constant: 20),
             emptyLabel.trailingAnchor.constraint(lessThanOrEqualTo: scrollView.trailingAnchor, constant: -20),
+            emptyLabel.widthAnchor.constraint(lessThanOrEqualTo: scrollView.widthAnchor, constant: -40),
         ])
     }
 
@@ -476,11 +485,56 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         }
     }
 
+    func controlTextDidChange(_ notification: Notification) {
+        guard notification.object as? NSSearchField === bucketField,
+              !suppressControlActions,
+              s3Location.bucket == nil,
+              !bucketListingUnavailable else { return }
+        applyBucketFilter()
+    }
+
+    @objc private func bucketFilterSubmitted(_ sender: Any?) {
+        guard s3Location.bucket == nil, !bucketListingUnavailable else {
+            browseRequested(sender)
+            return
+        }
+        applyBucketFilter()
+    }
+
     @objc private func browseRequested(_ sender: Any?) {
         guard let profile = selectedProfile else {
             showInlineError(.noProfileSelected)
             return
         }
+        if s3Location.bucket == nil, !bucketListingUnavailable {
+            if let selectedBucket = selectedBrowserItems.compactMap(\.s3Item).first(where: \.isBucket) {
+                delegate?.fileListDidNavigate(to: .s3(selectedBucket.location))
+                return
+            }
+
+            let query = bucketField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let exactBucket = allBucketItems.first(where: {
+                $0.name.localizedCaseInsensitiveCompare(query) == .orderedSame
+            }) {
+                delegate?.fileListDidNavigate(to: .s3(exactBucket.location))
+                return
+            }
+
+            if allBucketItems.isEmpty, let bucket = query.nonEmpty {
+                let location = S3Location(
+                    profileName: profile.name,
+                    regionOverride: selectedRegion(profile: profile),
+                    bucket: bucket,
+                    prefix: ""
+                )
+                delegate?.fileListDidNavigate(to: .s3(location))
+                return
+            }
+
+            applyBucketFilter()
+            return
+        }
+
         guard let bucket = bucketField.stringValue.nonEmpty else {
             showInlineError(.noBucketSelected)
             return
@@ -788,9 +842,12 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         let generation = staleLoadGuard.begin()
         let region = selectedRegion(profile: profile)
         s3Location = S3Location(profileName: profile.name, regionOverride: region, bucket: nil, prefix: "")
+        bucketListingUnavailable = false
+        bucketField.placeholderString = "Filter buckets"
         updateLocationSummary()
         updateActionAvailability()
         nextContinuationToken = nil
+        allBucketItems = []
         items = []
         tableView.reloadData()
         emptyLabel.stringValue = "Loading buckets..."
@@ -809,12 +866,12 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
                 )
                 await MainActor.run {
                     guard self.staleLoadGuard.isCurrent(generation) else { return }
-                    self.items = bucketItems
+                    self.allBucketItems = bucketItems
+                    self.bucketListingUnavailable = false
+                    self.bucketField.placeholderString = "Filter buckets"
                     self.nextContinuationToken = nil
-                    self.tableView.reloadData()
-                    self.setLoading(false, message: self.statusText())
-                    self.emptyLabel.stringValue = "No buckets were returned. Enter a bucket manually to continue."
-                    self.emptyLabel.isHidden = !self.items.isEmpty
+                    self.setLoading(false, message: nil)
+                    self.applyBucketFilter()
                     self.loadMoreButton.isHidden = true
                     self.retryButton.isHidden = true
                     self.detailsButton.isHidden = true
@@ -824,7 +881,9 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
                 let classified = S3BrowserError.classify(error, requestedRegion: region)
                 await MainActor.run {
                     guard self?.staleLoadGuard.isCurrent(generation) == true else { return }
-                    self?.showInlineError(.permission("Bucket listing unavailable. \(classified.localizedDescription) Enter a bucket manually to continue."))
+                    self?.bucketListingUnavailable = true
+                    self?.bucketField.placeholderString = "Enter exact bucket name"
+                    self?.showInlineError(.permission("Bucket listing unavailable. \(classified.localizedDescription) Enter an exact bucket name to continue."))
                 }
             }
         }
@@ -847,6 +906,35 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
                     metadata: nil
                 )
             }
+    }
+
+    static func filteredBucketItems(_ items: [S3Item], query: String) -> [S3Item] {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedQuery.isEmpty else { return items }
+        return items.filter { $0.name.localizedCaseInsensitiveContains(normalizedQuery) }
+    }
+
+    private func applyBucketFilter() {
+        guard s3Location.bucket == nil, !isLoading, !bucketListingUnavailable else { return }
+        let query = bucketField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        tableView.deselectAll(nil)
+        items = Self.filteredBucketItems(allBucketItems, query: query)
+        tableView.reloadData()
+        delegate?.fileListDidSelect(browserItems: [])
+        statusLabel.textColor = .secondaryLabelColor
+
+        let total = allBucketItems.count
+        if query.isEmpty {
+            setLoading(false, message: statusText())
+            emptyLabel.stringValue = "No buckets were returned. Enter a bucket manually to continue."
+        } else {
+            setLoading(false, message: "\(items.count) of \(total) buckets match \u{201C}\(query)\u{201D}")
+            emptyLabel.stringValue = "No buckets match \u{201C}\(query)\u{201D}"
+        }
+        emptyLabel.isHidden = !items.isEmpty
+        retryButton.isHidden = true
+        detailsButton.isHidden = true
+        lastError = nil
     }
 
     private var selectedProfile: AWSProfile? {
@@ -927,14 +1015,14 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         isLoading = false
         lastError = error
         statusLabel.textColor = .systemRed
-        statusLabel.stringValue = error.localizedDescription
+        statusLabel.stringValue = error.inlineDescription
         retryButton.isHidden = false
         detailsButton.isHidden = false
         loadingSpinner.stopAnimation(nil)
         browseButton.isEnabled = !profiles.isEmpty
         loadMoreButton.isHidden = true
         loadMoreButton.isEnabled = false
-        emptyLabel.stringValue = error.localizedDescription
+        emptyLabel.stringValue = error.inlineDescription
         emptyLabel.isHidden = false
         updateActionAvailability()
     }
