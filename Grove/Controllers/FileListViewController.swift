@@ -116,6 +116,12 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     private let emptyLabel = NSTextField(labelWithString: "Empty Folder")
     private let searchScopeLabel = NSTextField(labelWithString: "")
     private let loadingSpinner = NSProgressIndicator()
+    private let directoryHeader = NSView()
+    private let directoryTitleLabel = NSTextField(labelWithString: "")
+    private let directoryCountLabel = NSTextField(labelWithString: "")
+    private let directoryCapacityLabel = NSTextField(labelWithString: "")
+    private let storageMeter = GroveStorageMeter()
+    private var directoryStorageUsage: Double?
 
     // Scroll view top pins to the view (label hidden) or the label's bottom (label shown).
     // Both built once; toggle isActive instead of creating constraints per toggle.
@@ -166,10 +172,12 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     override func loadView() {
         view = NSView()
         view.setFrameSize(NSSize(width: 600, height: 400))
+        GroveUI.prepareSurface(view)
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        setupDirectoryHeader()
         setupTableView()
         setupStatusBar()
         setupEmptyLabel()
@@ -177,6 +185,73 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         setupSearchScopeLabel()
         setupAccessibility()
         loadDirectory(currentURL)
+    }
+
+    private func setupDirectoryHeader() {
+        directoryHeader.translatesAutoresizingMaskIntoConstraints = false
+        GroveUI.prepareSurface(directoryHeader, color: GroveUI.elevatedBackground)
+        view.addSubview(directoryHeader)
+
+        let folderIcon = NSImageView()
+        folderIcon.image = NSImage(
+            systemSymbolName: "folder.fill",
+            accessibilityDescription: "Current folder"
+        )?.withSymbolConfiguration(.init(pointSize: 12, weight: .medium))
+        folderIcon.contentTintColor = GroveUI.accentSoft
+        folderIcon.translatesAutoresizingMaskIntoConstraints = false
+
+        directoryTitleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        directoryTitleLabel.textColor = .labelColor
+        directoryTitleLabel.lineBreakMode = .byTruncatingMiddle
+        directoryTitleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        for label in [directoryCountLabel, directoryCapacityLabel] {
+            label.font = .systemFont(ofSize: GroveUI.statusFontSize, weight: .medium)
+            label.textColor = .secondaryLabelColor
+            label.setContentHuggingPriority(.required, for: .horizontal)
+        }
+
+        storageMeter.translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = NSStackView(views: [
+            folderIcon,
+            directoryTitleLabel,
+            directoryCountLabel,
+            directoryCapacityLabel,
+            storageMeter,
+        ])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        directoryHeader.addSubview(stack)
+
+        let separator = NSView()
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.wantsLayer = true
+        separator.layer?.backgroundColor = GroveUI.separator.cgColor
+        directoryHeader.addSubview(separator)
+
+        NSLayoutConstraint.activate([
+            directoryHeader.topAnchor.constraint(equalTo: view.topAnchor),
+            directoryHeader.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            directoryHeader.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            directoryHeader.heightAnchor.constraint(equalToConstant: 36),
+
+            folderIcon.widthAnchor.constraint(equalToConstant: 16),
+            folderIcon.heightAnchor.constraint(equalToConstant: 16),
+            storageMeter.widthAnchor.constraint(equalToConstant: 112),
+            storageMeter.heightAnchor.constraint(equalToConstant: 5),
+
+            stack.leadingAnchor.constraint(equalTo: directoryHeader.leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: directoryHeader.trailingAnchor, constant: -12),
+            stack.centerYAnchor.constraint(equalTo: directoryHeader.centerYAnchor),
+
+            separator.leadingAnchor.constraint(equalTo: directoryHeader.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: directoryHeader.trailingAnchor),
+            separator.bottomAnchor.constraint(equalTo: directoryHeader.bottomAnchor),
+            separator.heightAnchor.constraint(equalToConstant: 1),
+        ])
     }
 
     private func setupTableView() {
@@ -210,11 +285,15 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.usesAlternatingRowBackgroundColors = true
+        tableView.usesAlternatingRowBackgroundColors = false
         tableView.allowsMultipleSelection = true
         tableView.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         tableView.style = .fullWidth
         tableView.rowHeight = GroveUI.listRowHeight
+        tableView.backgroundColor = GroveUI.contentBackground
+        tableView.gridColor = GroveUI.separator
+        tableView.selectionHighlightStyle = .regular
+        tableView.intercellSpacing = NSSize(width: 0, height: 0)
         tableView.doubleAction = #selector(tableViewDoubleClicked(_:))
         tableView.target = self
         tableView.onRenameShortcut = { [weak self] in
@@ -258,6 +337,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = GroveUI.contentBackground
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scrollView)
     }
@@ -318,7 +399,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     private func setupSearchScopeLabel() {
         searchScopeLabel.font = .systemFont(ofSize: GroveUI.statusFontSize, weight: .medium)
         searchScopeLabel.textColor = .secondaryLabelColor
-        searchScopeLabel.backgroundColor = .controlBackgroundColor
+        searchScopeLabel.backgroundColor = GroveUI.elevatedBackground
         searchScopeLabel.drawsBackground = true
         searchScopeLabel.alignment = .center
         searchScopeLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -326,13 +407,13 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         view.addSubview(searchScopeLabel)
 
         NSLayoutConstraint.activate([
-            searchScopeLabel.topAnchor.constraint(equalTo: view.topAnchor),
+            searchScopeLabel.topAnchor.constraint(equalTo: directoryHeader.bottomAnchor),
             searchScopeLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             searchScopeLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             searchScopeLabel.heightAnchor.constraint(equalToConstant: 22),
         ])
 
-        scrollTopToView = scrollView.topAnchor.constraint(equalTo: view.topAnchor)
+        scrollTopToView = scrollView.topAnchor.constraint(equalTo: directoryHeader.bottomAnchor)
         scrollTopToLabel = scrollView.topAnchor.constraint(equalTo: searchScopeLabel.bottomAnchor)
         scrollTopToView?.isActive = true
     }
@@ -441,6 +522,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     func loadDirectory(_ url: URL) {
         reloadWorkItem?.cancel()
         currentURL = url
+        refreshDirectoryCapacity()
+        updateDirectoryHeader()
         filterText = ""
         isShowingSearchResults = false
         searchScopeLabel.isHidden = true
@@ -683,11 +766,41 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
             selectedItemCount: selectedCount,
             availableDiskSpace: diskSpace
         )
+        updateDirectoryHeader()
         LocalFooterDiskSpaceCache.shared.refreshIfNeeded(at: currentURL) { [weak self] refreshedURL in
             guard let self,
                   self.currentURL.standardizedFileURL == refreshedURL.standardizedFileURL else { return }
             self.updateStatusBar()
         }
+    }
+
+    private func updateDirectoryHeader() {
+        directoryTitleLabel.stringValue = currentURL.displayName
+        directoryTitleLabel.toolTip = currentURL.path
+        directoryCountLabel.stringValue = items.count == 1 ? "1 item" : "\(items.count) items"
+        directoryCapacityLabel.stringValue = LocalFooterDiskSpaceCache.shared.diskSpace(at: currentURL) ?? ""
+
+        if let directoryStorageUsage {
+            storageMeter.progress = directoryStorageUsage
+            storageMeter.toolTip = "\(Int(directoryStorageUsage * 100))% used"
+        } else {
+            storageMeter.progress = 0
+            storageMeter.toolTip = nil
+        }
+    }
+
+    private func refreshDirectoryCapacity() {
+        guard let values = try? currentURL.resourceValues(forKeys: [
+            .volumeTotalCapacityKey,
+            .volumeAvailableCapacityKey,
+        ]),
+        let total = values.volumeTotalCapacity,
+        total > 0,
+        let available = values.volumeAvailableCapacity else {
+            directoryStorageUsage = nil
+            return
+        }
+        directoryStorageUsage = min(max(1 - (Double(available) / Double(total)), 0), 1)
     }
 
     var selectedItems: [FileItem] {
@@ -1124,6 +1237,14 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         }
 
         return cell
+    }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let rowView = GroveTableRowView()
+        rowView.backgroundColor = row.isMultiple(of: 2)
+            ? GroveUI.contentBackground
+            : GroveUI.alternateRowBackground
+        return rowView
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
@@ -1642,48 +1763,11 @@ extension FileListViewController: NSMenuDelegate {
             targetURL = currentURL
         }
 
-        let script = Self.terminalChangeDirectoryScript(for: targetURL)
-
-        if let appleScript = NSAppleScript(source: script) {
-            var error: NSDictionary?
-            appleScript.executeAndReturnError(&error)
-            if error != nil {
-                showTerminalPermissionError()
-            }
-        }
-    }
-
-    private func showTerminalPermissionError() {
-        let alert = NSAlert()
-        alert.messageText = "Couldn't Open Terminal"
-        alert.informativeText = "Grove needs permission to control Terminal. Open System Settings > Privacy & Security > Automation and enable Terminal under Grove, then try again."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
-        if let window = view.window {
-            alert.beginSheetModal(for: window)
-        } else {
-            alert.runModal()
-        }
+        TerminalLauncher.open(at: targetURL, presentingView: view)
     }
 
     static func terminalChangeDirectoryScript(for url: URL) -> String {
-        let command = "cd \(shellQuotedPath(url.path))"
-        return """
-        tell application "Terminal"
-        activate
-        do script "\(appleScriptEscapedString(command))"
-        end tell
-        """
-    }
-
-    private static func shellQuotedPath(_ path: String) -> String {
-        "'\(path.replacingOccurrences(of: "'", with: "'\\''"))'"
-    }
-
-    private static func appleScriptEscapedString(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
+        TerminalLauncher.changeDirectoryScript(for: url)
     }
 
     // MARK: - Tags

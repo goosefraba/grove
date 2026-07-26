@@ -75,6 +75,10 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
         window.tabbingIdentifier = "com.grove.browser"
         window.titleVisibility = .visible
         window.toolbarStyle = .unified
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = GroveUI.windowBackground
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
         window.center()
 
         super.init(window: window)
@@ -99,7 +103,9 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
         let toolbar = NSToolbar(identifier: toolbarID)
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
+        toolbar.sizeMode = .small
         toolbar.allowsUserCustomization = false
+        toolbar.showsBaselineSeparator = true
         window?.toolbar = toolbar
     }
 

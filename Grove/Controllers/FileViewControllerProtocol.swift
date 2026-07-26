@@ -90,6 +90,22 @@ enum GroveUI {
     static let iconLabelFontSize: CGFloat = 10
     static let iconItemSize = NSSize(width: 84, height: 74)
     static let iconSize: CGFloat = 44
+    static let sidebarRailWidth: CGFloat = 56
+    static let sidebarListWidth: CGFloat = 190
+
+    // Grove's palette intentionally keeps the large surfaces neutral. Blue is reserved
+    // for focus, selection, and storage state so the app stays dark rather than navy.
+    static let windowBackground = NSColor(srgbRed: 0.030, green: 0.035, blue: 0.038, alpha: 1)
+    static let contentBackground = NSColor(srgbRed: 0.042, green: 0.047, blue: 0.050, alpha: 1)
+    static let elevatedBackground = NSColor(srgbRed: 0.064, green: 0.070, blue: 0.074, alpha: 1)
+    static let sidebarBackground = NSColor(srgbRed: 0.035, green: 0.040, blue: 0.043, alpha: 0.98)
+    static let railBackground = NSColor(srgbRed: 0.024, green: 0.028, blue: 0.030, alpha: 1)
+    static let alternateRowBackground = NSColor(srgbRed: 0.072, green: 0.078, blue: 0.081, alpha: 0.78)
+    static let separator = NSColor(srgbRed: 0.16, green: 0.18, blue: 0.19, alpha: 0.72)
+    static let accent = NSColor(srgbRed: 0.16, green: 0.59, blue: 1.0, alpha: 1)
+    static let accentSoft = NSColor(srgbRed: 0.39, green: 0.69, blue: 1.0, alpha: 1)
+    static let selectionFill = accent.withAlphaComponent(0.09)
+    static let selectionStroke = accent.withAlphaComponent(0.78)
 
     static func configureFooterStatusLabel(_ label: NSTextField) {
         label.font = .systemFont(ofSize: statusFontSize)
@@ -99,6 +115,120 @@ enum GroveUI {
         label.translatesAutoresizingMaskIntoConstraints = false
         label.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
         label.setAccessibilityIdentifier("localStatusFooter")
+    }
+
+    static func prepareSurface(_ view: NSView, color: NSColor = contentBackground) {
+        view.wantsLayer = true
+        view.layer?.backgroundColor = color.cgColor
+    }
+}
+
+final class GroveTableRowView: NSTableRowView {
+    private let horizontalInset: CGFloat
+
+    init(horizontalInset: CGFloat = 2) {
+        self.horizontalInset = horizontalInset
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) {
+        horizontalInset = 2
+        super.init(coder: coder)
+    }
+
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard selectionHighlightStyle != .none else { return }
+        let rect = bounds.insetBy(dx: horizontalInset, dy: 1)
+        let path = NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5)
+        GroveUI.selectionFill.setFill()
+        path.fill()
+        GroveUI.selectionStroke.setStroke()
+        path.lineWidth = 1
+        path.stroke()
+    }
+}
+
+final class GroveStorageMeter: NSView {
+    var progress: Double = 0 {
+        didSet {
+            needsDisplay = true
+        }
+    }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let track = NSBezierPath(roundedRect: bounds, xRadius: bounds.height / 2, yRadius: bounds.height / 2)
+        GroveUI.separator.setFill()
+        track.fill()
+
+        let fillWidth = bounds.width * min(max(progress, 0), 1)
+        guard fillWidth > 0 else { return }
+        let fillRect = NSRect(x: 0, y: 0, width: fillWidth, height: bounds.height)
+        let fill = NSBezierPath(roundedRect: fillRect, xRadius: bounds.height / 2, yRadius: bounds.height / 2)
+        GroveUI.accent.setFill()
+        fill.fill()
+    }
+}
+
+enum TerminalLauncher {
+    static func targetDirectory(currentURL: URL, selectedItems: [FileItem]) -> URL {
+        guard let selected = selectedItems.first else {
+            return currentURL.standardizedFileURL
+        }
+        if selected.isDirectory && !selected.isPackage {
+            return selected.url.standardizedFileURL
+        }
+        return selected.url.deletingLastPathComponent().standardizedFileURL
+    }
+
+    @discardableResult
+    static func open(at url: URL, presentingView: NSView?) -> Bool {
+        guard let appleScript = NSAppleScript(source: changeDirectoryScript(for: url)) else {
+            presentError(from: presentingView)
+            return false
+        }
+        var error: NSDictionary?
+        appleScript.executeAndReturnError(&error)
+        guard error == nil else {
+            presentError(from: presentingView)
+            return false
+        }
+        return true
+    }
+
+    static func changeDirectoryScript(for url: URL) -> String {
+        let command = "cd \(shellQuotedPath(url.path))"
+        return """
+        tell application "Terminal"
+        activate
+        do script "\(appleScriptEscapedString(command))"
+        end tell
+        """
+    }
+
+    private static func shellQuotedPath(_ path: String) -> String {
+        "'\(path.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private static func appleScriptEscapedString(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    private static func presentError(from view: NSView?) {
+        let alert = NSAlert()
+        alert.messageText = "Couldn't Open Terminal"
+        alert.informativeText = "Grove needs permission to control Terminal. Open System Settings > Privacy & Security > Automation and enable Terminal under Grove, then try again."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        if let window = view?.window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
     }
 }
 

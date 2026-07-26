@@ -3,6 +3,24 @@ import AppKit
 @testable import Grove
 
 final class BrowserCapabilityTests: XCTestCase {
+    @MainActor
+    func testSidebarRailRoutesCloudAndTerminalActions() throws {
+        let controller = SidebarViewController()
+        let delegate = SidebarRailDelegate()
+        controller.delegate = delegate
+        controller.loadViewIfNeeded()
+
+        let buttons = Self.descendants(of: controller.view).compactMap { $0 as? NSButton }
+        let cloudButton = try XCTUnwrap(buttons.first { $0.toolTip == "Amazon S3" })
+        let terminalButton = try XCTUnwrap(buttons.first { $0.toolTip == "Open Terminal Here" })
+
+        cloudButton.performClick(nil)
+        terminalButton.performClick(nil)
+
+        XCTAssertEqual(delegate.selectedLocation, .s3(S3Location()))
+        XCTAssertEqual(delegate.terminalRequestCount, 1)
+    }
+
     func testS3ContextMenuDoesNotAdvertiseLocalOnlyCommands() {
         let location = S3Location(profileName: "ops", regionOverride: "us-east-1", bucket: "bucket", prefix: "")
         let selectedItemSets = [
@@ -42,6 +60,32 @@ final class BrowserCapabilityTests: XCTestCase {
         XCTAssertTrue(script.contains("`echo bad`"))
         XCTAssertTrue(script.contains("'\\\\''quoted'\\\\'''"))
         XCTAssertFalse(script.contains("cd \\\"/tmp"))
+    }
+
+    func testTerminalTargetUsesSelectedFolderAndFileParent() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("grove-terminal-target-\(UUID().uuidString)", isDirectory: true)
+        let selectedFolder = root.appendingPathComponent("Selected Folder", isDirectory: true)
+        let selectedFile = selectedFolder.appendingPathComponent("notes.txt")
+        try FileManager.default.createDirectory(at: selectedFolder, withIntermediateDirectories: true)
+        try Data("test".utf8).write(to: selectedFile)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let folderItem = try XCTUnwrap(FileItem.load(from: selectedFolder))
+        let fileItem = try XCTUnwrap(FileItem.load(from: selectedFile))
+
+        XCTAssertEqual(
+            TerminalLauncher.targetDirectory(currentURL: root, selectedItems: [folderItem]),
+            selectedFolder.standardizedFileURL
+        )
+        XCTAssertEqual(
+            TerminalLauncher.targetDirectory(currentURL: root, selectedItems: [fileItem]),
+            selectedFolder.standardizedFileURL
+        )
+        XCTAssertEqual(
+            TerminalLauncher.targetDirectory(currentURL: root, selectedItems: []),
+            root.standardizedFileURL
+        )
     }
 
     func testTerminalCopyPathShellQuotesFileAndFolderPaths() {
@@ -113,4 +157,28 @@ final class BrowserCapabilityTests: XCTestCase {
             metadata: nil
         )
     }
+
+    private static func descendants(of view: NSView) -> [NSView] {
+        view.subviews.flatMap { [$0] + descendants(of: $0) }
+    }
+}
+
+@MainActor
+private final class SidebarRailDelegate: SidebarViewControllerDelegate {
+    var selectedLocation: StorageLocation?
+    var terminalRequestCount = 0
+
+    func sidebarDidSelect(url: URL) {
+        selectedLocation = .local(url.standardizedFileURL)
+    }
+
+    func sidebarDidSelect(location: StorageLocation) {
+        selectedLocation = location
+    }
+
+    func sidebarDidRequestTerminal() {
+        terminalRequestCount += 1
+    }
+
+    func sidebarDidRequestDualPane() {}
 }

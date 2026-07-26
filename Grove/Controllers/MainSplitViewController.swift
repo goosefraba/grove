@@ -39,12 +39,15 @@ final class MainSplitViewController: NSSplitViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        GroveUI.prepareSurface(view)
+        splitView.dividerStyle = .thin
 
         sidebarVC.delegate = self
         fileListVC.delegate = self
 
         let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebarVC)
-        sidebarItem.minimumThickness = 150
+        sidebarItem.minimumThickness = GroveUI.sidebarRailWidth + 164
+        sidebarItem.maximumThickness = 340
         sidebarItem.canCollapse = true
 
         contentItem = NSSplitViewItem(viewController: fileListVC)
@@ -393,6 +396,24 @@ extension MainSplitViewController: SidebarViewControllerDelegate {
 
     func sidebarDidSelect(location: StorageLocation) {
         navigationDelegate?.splitViewDidNavigate(to: location)
+    }
+
+    func sidebarDidRequestTerminal() {
+        guard currentLocation.isLocal else { return }
+        let contentController: (any FileViewControllerProtocol)? = isDualPaneActive
+            ? dualPaneVC?.activePane
+            : currentContentVC
+        guard let contentController else { return }
+        let target = TerminalLauncher.targetDirectory(
+            currentURL: contentController.currentURL,
+            selectedItems: contentController.selectedItems
+        )
+        TerminalLauncher.open(at: target, presentingView: view)
+    }
+
+    func sidebarDidRequestDualPane() {
+        guard currentLocation.isLocal else { return }
+        toggleDualPane()
     }
 }
 

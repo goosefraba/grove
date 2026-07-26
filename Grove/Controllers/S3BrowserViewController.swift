@@ -112,6 +112,7 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
     override func loadView() {
         view = NSView()
         view.setFrameSize(NSSize(width: 600, height: 400))
+        GroveUI.prepareSurface(view)
     }
 
     override func viewDidLoad() {
@@ -327,10 +328,13 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
 
         tableView.delegate = self
         tableView.dataSource = self
-        tableView.usesAlternatingRowBackgroundColors = true
+        tableView.usesAlternatingRowBackgroundColors = false
         tableView.allowsMultipleSelection = true
         tableView.style = .fullWidth
         tableView.rowHeight = GroveUI.listRowHeight
+        tableView.backgroundColor = GroveUI.contentBackground
+        tableView.gridColor = GroveUI.separator
+        tableView.intercellSpacing = .zero
         tableView.doubleAction = #selector(tableDoubleClicked(_:))
         tableView.target = self
         tableView.registerForDraggedTypes([.fileURL])
@@ -341,6 +345,8 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = GroveUI.contentBackground
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.registerForDraggedTypes([.fileURL])
         scrollView.onValidateBackgroundDrop = { [weak self] info in
@@ -1087,6 +1093,14 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
         }
 
         return cell
+    }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let rowView = GroveTableRowView()
+        rowView.backgroundColor = row.isMultiple(of: 2)
+            ? GroveUI.contentBackground
+            : GroveUI.alternateRowBackground
+        return rowView
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {

@@ -3,6 +3,8 @@ import AppKit
 protocol SidebarViewControllerDelegate: AnyObject {
     func sidebarDidSelect(url: URL)
     func sidebarDidSelect(location: StorageLocation)
+    func sidebarDidRequestTerminal()
+    func sidebarDidRequestDualPane()
 }
 
 extension SidebarViewControllerDelegate {
@@ -12,12 +14,37 @@ extension SidebarViewControllerDelegate {
     }
 }
 
+private final class SidebarRailButton: NSButton {
+    var isRailSelected = false {
+        didSet { needsDisplay = true }
+    }
+
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        super.updateLayer()
+        layer?.cornerRadius = 7
+        layer?.borderWidth = isRailSelected ? 1 : 0
+        layer?.borderColor = GroveUI.selectionStroke.cgColor
+        layer?.backgroundColor = isRailSelected
+            ? GroveUI.accent.withAlphaComponent(0.12).cgColor
+            : NSColor.clear.cgColor
+        contentTintColor = isRailSelected ? GroveUI.accentSoft : .secondaryLabelColor
+    }
+}
+
 final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     weak var delegate: SidebarViewControllerDelegate?
 
     private let scrollView = NSScrollView()
     private let outlineView = NSOutlineView()
+    private let railView = NSView()
+    private let railStack = NSStackView()
+    private let railBottomStack = NSStackView()
+    private var filesRailButton: SidebarRailButton?
+    private var cloudRailButton: SidebarRailButton?
+    private var trashRailButton: SidebarRailButton?
 
     private let sections = SidebarSection.allCases
     private var items: [SidebarSection: [SidebarItem]] = [:]
@@ -33,7 +60,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     override func loadView() {
         view = NSView()
-        view.setFrameSize(NSSize(width: 200, height: 400))
+        view.setFrameSize(NSSize(width: GroveUI.sidebarRailWidth + GroveUI.sidebarListWidth, height: 400))
+        GroveUI.prepareSurface(view, color: GroveUI.sidebarBackground)
     }
 
     deinit {
@@ -45,6 +73,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     override func viewDidLoad() {
         super.viewDidLoad()
         reloadItems()
+        setupRail()
         setupOutlineView()
         setupAccessibility()
 
@@ -131,6 +160,9 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         outlineView.rowHeight = 22
         outlineView.style = .sourceList
         outlineView.floatsGroupRows = false
+        outlineView.backgroundColor = .clear
+        outlineView.usesAlternatingRowBackgroundColors = false
+        outlineView.selectionHighlightStyle = .regular
 
         outlineView.registerForDraggedTypes([.fileURL, Self.sidebarItemPasteboardType])
         outlineView.setDraggingSourceOperationMask(.move, forLocal: true)
@@ -141,19 +173,163 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
         scrollView.documentView = outlineView
         scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: view.topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: railView.trailingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
 
         outlineView.reloadData()
 
         expandAllSections()
+    }
+
+    private func setupRail() {
+        railView.translatesAutoresizingMaskIntoConstraints = false
+        GroveUI.prepareSurface(railView, color: GroveUI.railBackground)
+        view.addSubview(railView)
+
+        railStack.orientation = .vertical
+        railStack.alignment = .centerX
+        railStack.spacing = 8
+        railStack.translatesAutoresizingMaskIntoConstraints = false
+        railView.addSubview(railStack)
+
+        railBottomStack.orientation = .vertical
+        railBottomStack.alignment = .centerX
+        railBottomStack.spacing = 8
+        railBottomStack.translatesAutoresizingMaskIntoConstraints = false
+        railView.addSubview(railBottomStack)
+
+        let files = makeRailButton(
+            symbol: "folder",
+            label: "Files",
+            action: #selector(openFilesFromRail(_:))
+        )
+        files.isRailSelected = true
+        filesRailButton = files
+        railStack.addArrangedSubview(files)
+        railStack.addArrangedSubview(makeRailButton(
+            symbol: "star",
+            label: "Favorites",
+            action: #selector(showFavoritesFromRail(_:))
+        ))
+        railStack.addArrangedSubview(makeRailButton(
+            symbol: "square.split.2x1",
+            label: "Dual Pane",
+            action: #selector(toggleDualPaneFromRail(_:))
+        ))
+        railStack.addArrangedSubview(makeRailSeparator())
+        railStack.addArrangedSubview(makeRailButton(
+            symbol: "terminal",
+            label: "Open Terminal Here",
+            action: #selector(openTerminalFromRail(_:))
+        ))
+
+        let cloud = makeRailButton(
+            symbol: "cloud",
+            label: "Amazon S3",
+            action: #selector(openS3FromRail(_:))
+        )
+        cloudRailButton = cloud
+        railStack.addArrangedSubview(cloud)
+
+        let trash = makeRailButton(
+            symbol: "trash",
+            label: "Trash",
+            action: #selector(openTrashFromRail(_:))
+        )
+        trashRailButton = trash
+        railBottomStack.addArrangedSubview(trash)
+
+        let divider = NSView()
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        divider.wantsLayer = true
+        divider.layer?.backgroundColor = GroveUI.separator.cgColor
+        railView.addSubview(divider)
+
+        NSLayoutConstraint.activate([
+            railView.topAnchor.constraint(equalTo: view.topAnchor),
+            railView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            railView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            railView.widthAnchor.constraint(equalToConstant: GroveUI.sidebarRailWidth),
+
+            railStack.topAnchor.constraint(equalTo: railView.topAnchor, constant: 10),
+            railStack.centerXAnchor.constraint(equalTo: railView.centerXAnchor),
+
+            railBottomStack.bottomAnchor.constraint(equalTo: railView.bottomAnchor, constant: -12),
+            railBottomStack.centerXAnchor.constraint(equalTo: railView.centerXAnchor),
+
+            divider.topAnchor.constraint(equalTo: railView.topAnchor),
+            divider.bottomAnchor.constraint(equalTo: railView.bottomAnchor),
+            divider.trailingAnchor.constraint(equalTo: railView.trailingAnchor),
+            divider.widthAnchor.constraint(equalToConstant: 1),
+        ])
+    }
+
+    private func makeRailButton(symbol: String, label: String, action: Selector) -> SidebarRailButton {
+        let button = SidebarRailButton(title: "", target: self, action: action)
+        button.isBordered = false
+        button.imagePosition = .imageOnly
+        button.image = NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: label
+        )?.withSymbolConfiguration(.init(pointSize: 15, weight: .medium))
+        button.toolTip = label
+        button.setAccessibilityLabel(label)
+        button.setAccessibilityIdentifier("sidebarRail_\(label.replacingOccurrences(of: " ", with: ""))")
+        button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: 38),
+            button.heightAnchor.constraint(equalToConstant: 38),
+        ])
+        return button
+    }
+
+    private func makeRailSeparator() -> NSView {
+        let separator = NSView()
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.wantsLayer = true
+        separator.layer?.backgroundColor = GroveUI.separator.cgColor
+        NSLayoutConstraint.activate([
+            separator.widthAnchor.constraint(equalToConstant: 28),
+            separator.heightAnchor.constraint(equalToConstant: 1),
+        ])
+        return separator
+    }
+
+    @objc private func openFilesFromRail(_ sender: Any?) {
+        delegate?.sidebarDidSelect(url: FileManager.default.homeDirectoryForCurrentUser)
+    }
+
+    @objc private func showFavoritesFromRail(_ sender: Any?) {
+        outlineView.expandItem(SidebarSection.favorites)
+        let row = outlineView.row(forItem: SidebarSection.favorites)
+        if row >= 0 {
+            outlineView.scrollRowToVisible(row)
+        }
+    }
+
+    @objc private func toggleDualPaneFromRail(_ sender: Any?) {
+        delegate?.sidebarDidRequestDualPane()
+    }
+
+    @objc private func openTerminalFromRail(_ sender: Any?) {
+        delegate?.sidebarDidRequestTerminal()
+    }
+
+    @objc private func openS3FromRail(_ sender: Any?) {
+        delegate?.sidebarDidSelect(location: .s3(S3Location()))
+    }
+
+    @objc private func openTrashFromRail(_ sender: Any?) {
+        let trashURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash")
+        delegate?.sidebarDidSelect(url: trashURL)
     }
 
     // MARK: - NSOutlineViewDataSource
@@ -371,7 +547,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 ])
             }
 
-            cell.textField?.stringValue = section.rawValue
+            cell.textField?.stringValue = section.rawValue.uppercased()
             cell.textField?.font = .systemFont(ofSize: GroveUI.sidebarSectionFontSize, weight: .semibold)
             cell.textField?.textColor = .secondaryLabelColor
             cell.setAccessibilityLabel("Section: \(section.rawValue)")
@@ -446,20 +622,11 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     private func sidebarIconTint(for item: SidebarItem) -> NSColor {
-        guard let kind = item.mountedVolume?.kind else {
-            return .controlAccentColor
-        }
+        item.mountedVolume?.kind == .internalDisk ? .secondaryLabelColor : GroveUI.accentSoft
+    }
 
-        switch kind {
-        case .diskImage:
-            return .systemOrange
-        case .network:
-            return .systemTeal
-        case .internalDisk, .localVolume:
-            return .secondaryLabelColor
-        case .removable, .external:
-            return .controlAccentColor
-        }
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+        GroveTableRowView(horizontalInset: 4)
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -474,6 +641,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     func selectItem(for location: StorageLocation) {
+        updateRailSelection(for: location)
         suppressSelectionCallback = true
         defer { suppressSelectionCallback = false }
         for section in sections {
@@ -490,6 +658,15 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             }
         }
         outlineView.deselectAll(nil)
+    }
+
+    private func updateRailSelection(for location: StorageLocation) {
+        let isS3 = !location.isLocal
+        let isTrash = location.localURL?.standardizedFileURL ==
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash").standardizedFileURL
+        cloudRailButton?.isRailSelected = isS3
+        trashRailButton?.isRailSelected = isTrash
+        filesRailButton?.isRailSelected = !isS3 && !isTrash
     }
 
     // MARK: - Context Menu Action
