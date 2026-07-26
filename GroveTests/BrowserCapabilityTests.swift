@@ -4,6 +4,19 @@ import AppKit
 
 final class BrowserCapabilityTests: XCTestCase {
     @MainActor
+    func testBrowserContentStaysBelowCompactToolbarSafeArea() throws {
+        let controller = BrowserWindowController()
+        defer { controller.window?.close() }
+
+        let window = try XCTUnwrap(controller.window)
+        XCTAssertFalse(window.styleMask.contains(.fullSizeContentView))
+        XCTAssertEqual(window.titleVisibility, .hidden)
+        XCTAssertEqual(window.toolbarStyle, .unifiedCompact)
+        XCTAssertFalse(window.titlebarAppearsTransparent)
+        XCTAssertFalse(window.isMovableByWindowBackground)
+    }
+
+    @MainActor
     func testSidebarRailRoutesCloudAndTerminalActions() throws {
         let controller = SidebarViewController()
         let delegate = SidebarRailDelegate()

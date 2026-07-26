@@ -64,7 +64,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
 
         let window = BrowserWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -73,12 +73,16 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
         window.tab.title = initialLocation.displayName
         window.tabbingMode = .preferred
         window.tabbingIdentifier = "com.grove.browser"
-        window.titleVisibility = .visible
-        window.toolbarStyle = .unified
+        // Keep application content below AppKit's titlebar safe area. The sidebar
+        // rail and directory header have their own top-aligned controls, so opting
+        // them into full-size titlebar content makes them collide with the traffic
+        // lights and toolbar items.
+        window.titleVisibility = .hidden
+        window.toolbarStyle = .unifiedCompact
         window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = GroveUI.windowBackground
-        window.titlebarAppearsTransparent = true
-        window.isMovableByWindowBackground = true
+        window.titlebarAppearsTransparent = false
+        window.isMovableByWindowBackground = false
         window.center()
 
         super.init(window: window)
