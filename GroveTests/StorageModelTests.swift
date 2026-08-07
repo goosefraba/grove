@@ -121,6 +121,9 @@ final class StorageModelTests: XCTestCase {
         XCTAssertEqual(volume.systemImage, "opticaldiscdrive")
         XCTAssertEqual(volume.sidebarDetail, "Disk Image")
         XCTAssertTrue(volume.toolTip.contains("Disk Image"))
+
+        let sidebarItem = SidebarItem.volumeItems(from: [volume]).first
+        XCTAssertTrue(sidebarItem?.showsInlineEjectButton == true)
     }
 
     func testInternalMountedVolumeDoesNotAdvertiseEject() {
@@ -137,6 +140,13 @@ final class StorageModelTests: XCTestCase {
         XCTAssertEqual(volume.systemImage, "internaldrive")
         XCTAssertNil(volume.sidebarDetail)
         XCTAssertFalse(volume.supportsEject)
+        XCTAssertFalse(SidebarItem(
+            title: volume.displayName,
+            url: volume.url,
+            systemImage: volume.systemImage,
+            section: .locations,
+            mountedVolume: volume
+        ).showsInlineEjectButton)
         XCTAssertTrue(volume.contains(URL(fileURLWithPath: "/Users/test/Documents")))
     }
 

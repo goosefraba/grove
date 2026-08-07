@@ -57,6 +57,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private var cachedDragOperation: NSDragOperation = []
     private static let sidebarItemPasteboardType = NSPasteboard.PasteboardType("com.grove.sidebaritem")
     private static let sidebarDetailLabelTag = 1_207
+    private static let sidebarEjectButtonTag = 1_208
 
     override func loadView() {
         view = NSView()
@@ -585,6 +586,23 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 detail.setContentHuggingPriority(.required, for: .horizontal)
                 cell.addSubview(detail)
 
+                let ejectButton = NSButton(
+                    image: NSImage(systemSymbolName: "eject", accessibilityDescription: "Eject")!,
+                    target: self,
+                    action: #selector(ejectMountedVolumeButton(_:))
+                )
+                ejectButton.translatesAutoresizingMaskIntoConstraints = false
+                ejectButton.tag = Self.sidebarEjectButtonTag
+                ejectButton.isBordered = false
+                ejectButton.bezelStyle = .inline
+                ejectButton.imagePosition = .imageOnly
+                ejectButton.imageScaling = .scaleProportionallyDown
+                ejectButton.contentTintColor = .secondaryLabelColor
+                ejectButton.focusRingType = .none
+                ejectButton.setContentHuggingPriority(.required, for: .horizontal)
+                ejectButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+                cell.addSubview(ejectButton)
+
                 NSLayoutConstraint.activate([
                     iv.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
                     iv.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
@@ -593,14 +611,24 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                     tf.leadingAnchor.constraint(equalTo: iv.trailingAnchor, constant: 6),
                     tf.trailingAnchor.constraint(lessThanOrEqualTo: detail.leadingAnchor, constant: -6),
                     tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                    detail.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -4),
+                    detail.trailingAnchor.constraint(lessThanOrEqualTo: ejectButton.leadingAnchor, constant: -6),
                     detail.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                    ejectButton.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+                    ejectButton.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                    ejectButton.widthAnchor.constraint(equalToConstant: 18),
+                    ejectButton.heightAnchor.constraint(equalToConstant: 18),
                 ])
             }
 
             let detail = cell.viewWithTag(Self.sidebarDetailLabelTag) as? NSTextField
             detail?.stringValue = sidebarItem.sidebarDetail ?? ""
             detail?.isHidden = sidebarItem.sidebarDetail == nil
+
+            let ejectButton = cell.viewWithTag(Self.sidebarEjectButtonTag) as? NSButton
+            ejectButton?.isHidden = !sidebarItem.showsInlineEjectButton
+            ejectButton?.toolTip = sidebarItem.showsInlineEjectButton ? "Eject \(sidebarItem.title)" : nil
+            ejectButton?.setAccessibilityLabel("Eject \(sidebarItem.title)")
+            ejectButton?.setAccessibilityIdentifier("eject_sidebar_\(sidebarItem.title)")
 
             cell.textField?.stringValue = sidebarItem.title
             cell.textField?.font = .systemFont(ofSize: GroveUI.sidebarFontSize)
@@ -761,7 +789,20 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
 
     @objc private func ejectMountedVolume(_ sender: Any) {
         guard let sidebarItem = sidebarItem(from: sender),
-              let mountedVolume = sidebarItem.mountedVolume,
+              sidebarItem.showsInlineEjectButton else { return }
+        performEject(of: sidebarItem)
+    }
+
+    @objc private func ejectMountedVolumeButton(_ sender: NSButton) {
+        let row = outlineView.row(for: sender)
+        guard row >= 0,
+              let sidebarItem = outlineView.item(atRow: row) as? SidebarItem,
+              sidebarItem.showsInlineEjectButton else { return }
+        performEject(of: sidebarItem)
+    }
+
+    private func performEject(of sidebarItem: SidebarItem) {
+        guard let mountedVolume = sidebarItem.mountedVolume,
               mountedVolume.supportsEject else { return }
 
         // Unmount can block for a long time on busy or network volumes; run it off the

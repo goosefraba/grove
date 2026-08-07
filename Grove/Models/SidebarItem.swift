@@ -433,6 +433,10 @@ struct SidebarItem: Hashable {
         mountedVolume?.sidebarDetail
     }
 
+    var showsInlineEjectButton: Bool {
+        mountedVolume?.supportsEject == true
+    }
+
     func representsProvider(of otherLocation: StorageLocation) -> Bool {
         switch (location, otherLocation) {
         case (.local, .local(let otherURL)):
