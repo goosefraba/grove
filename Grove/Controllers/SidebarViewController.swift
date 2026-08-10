@@ -33,6 +33,16 @@ private final class SidebarRailButton: NSButton {
     }
 }
 
+private final class SidebarDataCellView: NSTableCellView {
+    var detailToEjectConstraint: NSLayoutConstraint?
+    var detailToCellConstraint: NSLayoutConstraint?
+
+    func setShowsEjectButton(_ showsEjectButton: Bool) {
+        detailToEjectConstraint?.isActive = showsEjectButton
+        detailToCellConstraint?.isActive = !showsEjectButton
+    }
+}
+
 final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     weak var delegate: SidebarViewControllerDelegate?
@@ -560,7 +570,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             let cell = outlineView.makeView(
                 withIdentifier: NSUserInterfaceItemIdentifier("DataCell"),
                 owner: self
-            ) as? NSTableCellView ?? NSTableCellView()
+            ) as? SidebarDataCellView ?? SidebarDataCellView()
             cell.identifier = NSUserInterfaceItemIdentifier("DataCell")
 
             if cell.textField == nil {
@@ -603,6 +613,17 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                 ejectButton.setContentCompressionResistancePriority(.required, for: .horizontal)
                 cell.addSubview(ejectButton)
 
+                let detailToEjectConstraint = detail.trailingAnchor.constraint(
+                    lessThanOrEqualTo: ejectButton.leadingAnchor,
+                    constant: -6
+                )
+                let detailToCellConstraint = detail.trailingAnchor.constraint(
+                    lessThanOrEqualTo: cell.trailingAnchor,
+                    constant: -4
+                )
+                cell.detailToEjectConstraint = detailToEjectConstraint
+                cell.detailToCellConstraint = detailToCellConstraint
+
                 NSLayoutConstraint.activate([
                     iv.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
                     iv.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
@@ -611,7 +632,6 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
                     tf.leadingAnchor.constraint(equalTo: iv.trailingAnchor, constant: 6),
                     tf.trailingAnchor.constraint(lessThanOrEqualTo: detail.leadingAnchor, constant: -6),
                     tf.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                    detail.trailingAnchor.constraint(lessThanOrEqualTo: ejectButton.leadingAnchor, constant: -6),
                     detail.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
                     ejectButton.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
                     ejectButton.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
@@ -625,8 +645,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             detail?.isHidden = sidebarItem.sidebarDetail == nil
 
             let ejectButton = cell.viewWithTag(Self.sidebarEjectButtonTag) as? NSButton
-            ejectButton?.isHidden = !sidebarItem.showsInlineEjectButton
-            ejectButton?.toolTip = sidebarItem.showsInlineEjectButton ? "Eject \(sidebarItem.title)" : nil
+            let showsEjectButton = sidebarItem.showsInlineEjectButton
+            ejectButton?.isHidden = !showsEjectButton
+            cell.setShowsEjectButton(showsEjectButton)
+            ejectButton?.toolTip = showsEjectButton ? "Eject \(sidebarItem.title)" : nil
             ejectButton?.setAccessibilityLabel("Eject \(sidebarItem.title)")
             ejectButton?.setAccessibilityIdentifier("eject_sidebar_\(sidebarItem.title)")
 
