@@ -1222,8 +1222,7 @@ final class S3BrowserViewController: NSViewController, FileViewControllerProtoco
             item.key.isEmpty ? "s3://\(item.bucket)" : "s3://\(item.bucket)/\(item.key)"
         }
         guard !values.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(values.joined(separator: "\n"), forType: .string)
+        FileOperationClipboard.writeString(values.joined(separator: "\n"))
     }
 
     static let forbiddenLocalCommandTitles: Set<String> = [

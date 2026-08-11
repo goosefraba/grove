@@ -32,3 +32,50 @@ final class NavigationHistoryTests: XCTestCase {
         XCTAssertEqual(backCount, 100)
     }
 }
+
+final class PasteboardChangeCoordinatorTests: XCTestCase {
+    func testOneChangeInvalidatesEveryLiveWindowObserver() {
+        var changeCount = 10
+        let coordinator = PasteboardChangeCoordinator(
+            changeCountProvider: { changeCount },
+            pollingInterval: 60,
+            notificationCenter: nil
+        )
+        var firstWindowInvalidations = 0
+        var secondWindowInvalidations = 0
+        let firstObservation = coordinator.observe { firstWindowInvalidations += 1 }
+        let secondObservation = coordinator.observe { secondWindowInvalidations += 1 }
+
+        changeCount += 1
+        coordinator.detectChange()
+
+        XCTAssertEqual(firstWindowInvalidations, 1)
+        XCTAssertEqual(secondWindowInvalidations, 1)
+        withExtendedLifetime((firstObservation, secondObservation)) {}
+    }
+
+    func testObservationDeallocationStopsMonitoringAfterLastWindowCloses() {
+        var changeCount = 20
+        let coordinator = PasteboardChangeCoordinator(
+            changeCountProvider: { changeCount },
+            pollingInterval: 60,
+            notificationCenter: nil
+        )
+        var invalidations = 0
+        var observation: PasteboardChangeCoordinator.Observation? = coordinator.observe {
+            invalidations += 1
+        }
+
+        XCTAssertEqual(coordinator.observerCount, 1)
+        XCTAssertTrue(coordinator.isMonitoring)
+
+        observation = nil
+        XCTAssertNil(observation)
+        XCTAssertEqual(coordinator.observerCount, 0)
+        XCTAssertFalse(coordinator.isMonitoring)
+
+        changeCount += 1
+        coordinator.detectChange()
+        XCTAssertEqual(invalidations, 0)
+    }
+}

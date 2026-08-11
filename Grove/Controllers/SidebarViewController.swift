@@ -804,9 +804,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         guard let sidebarItem = sidebarItem(from: sender),
               let url = sidebarItem.location.localURL else { return }
 
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(PathCopyFormatter.string(for: url, format: format), forType: .string)
+        FileOperationClipboard.writeString(PathCopyFormatter.string(for: url, format: format))
     }
 
     @objc private func ejectMountedVolume(_ sender: Any) {

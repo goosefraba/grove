@@ -157,6 +157,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     // the pasteboard's changeCount changes so cell rendering stays cheap.
     private var cachedCutChangeCount: Int = -1
     private var cachedCutURLs: Set<URL> = []
+    private var clipboardObservation: PasteboardChangeCoordinator.Observation?
     private var editingRow: Int = -1
     private var editingURL: URL?
     private var pendingSelectionURL: URL?
@@ -184,6 +185,9 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         setupLoadingSpinner()
         setupSearchScopeLabel()
         setupAccessibility()
+        clipboardObservation = FileOperationClipboard.observeChanges { [weak self] in
+            self?.refreshCutIndication()
+        }
         loadDirectory(currentURL)
     }
 
@@ -826,23 +830,13 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     func copySelectedFiles() {
         let urls = selectedItems.map(\.url)
         guard !urls.isEmpty else { return }
-
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.writeObjects(urls as [NSURL])
-        pb.setString("copy", forType: FileOperationClipboard.pasteboardType)
-        refreshCutIndication()
+        FileOperationClipboard.write(urls, isCut: false)
     }
 
     func cutSelectedFiles() {
         let urls = selectedItems.map(\.url)
         guard !urls.isEmpty else { return }
-
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.writeObjects(urls as [NSURL])
-        pb.setString("cut", forType: FileOperationClipboard.pasteboardType)
-        refreshCutIndication()
+        FileOperationClipboard.write(urls, isCut: true)
     }
 
     /// Set of file URLs currently marked as cut on the general pasteboard.
@@ -879,10 +873,9 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         let isCut = pb.string(forType: FileOperationClipboard.pasteboardType) == "cut"
         let destination = currentURL
 
-        performBackgroundTransfer(urls, to: destination, isMove: isCut) { [weak self] in
+        performBackgroundTransfer(urls, to: destination, isMove: isCut) {
             guard isCut else { return }
-            NSPasteboard.general.clearContents()
-            self?.refreshCutIndication()
+            FileOperationClipboard.clear()
         }
     }
 
@@ -1669,9 +1662,7 @@ extension FileListViewController: NSMenuDelegate {
     private func copySelectedPaths(format: PathCopyFormat) {
         let paths = selectedItems.map { PathCopyFormatter.string(for: $0.url, format: format) }
         guard !paths.isEmpty else { return }
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(paths.joined(separator: "\n"), forType: .string)
+        FileOperationClipboard.writeString(paths.joined(separator: "\n"))
     }
 
     static func terminalCopyPath(for url: URL) -> String {
@@ -1734,9 +1725,7 @@ extension FileListViewController: NSMenuDelegate {
         FileOperationService.shared.computeChecksum(for: item.url, algorithm: algorithm) { [weak self] result in
             switch result {
             case .success(let hash):
-                let pb = NSPasteboard.general
-                pb.clearContents()
-                pb.setString(hash, forType: .string)
+                FileOperationClipboard.writeString(hash)
             case .failure(let error):
                 self?.showError(error)
             }

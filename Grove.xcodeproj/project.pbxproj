@@ -50,6 +50,7 @@
 			A20000010000000000000005 /* S3BrowserServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000005 /* S3BrowserServiceTests.swift */; };
 			A20000010000000000000006 /* BrowserCapabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000006 /* BrowserCapabilityTests.swift */; };
 			A20000010000000000000007 /* PathCopyFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000007 /* PathCopyFormatterTests.swift */; };
+			A20000010000000000000008 /* SearchServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000008 /* SearchServiceTests.swift */; };
 			A30000010000000000000001 /* AWSS3 in Frameworks */ = {isa = PBXBuildFile; productRef = Q30000010000000000000001 /* AWSS3 */; };
 			A30000010000000000000002 /* AWSSDKIdentity in Frameworks */ = {isa = PBXBuildFile; productRef = Q30000010000000000000002 /* AWSSDKIdentity */; };
 	/* End PBXBuildFile section */
@@ -111,6 +112,7 @@
 			B20000010000000000000005 /* S3BrowserServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = S3BrowserServiceTests.swift; sourceTree = "<group>"; };
 			B20000010000000000000006 /* BrowserCapabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserCapabilityTests.swift; sourceTree = "<group>"; };
 			B20000010000000000000007 /* PathCopyFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PathCopyFormatterTests.swift; sourceTree = "<group>"; };
+			B20000010000000000000008 /* SearchServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchServiceTests.swift; sourceTree = "<group>"; };
 			C20000010000000000000001 /* GroveTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = GroveTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 	/* End PBXFileReference section */
 
@@ -263,6 +265,7 @@
 					B20000010000000000000005 /* S3BrowserServiceTests.swift */,
 					B20000010000000000000006 /* BrowserCapabilityTests.swift */,
 					B20000010000000000000007 /* PathCopyFormatterTests.swift */,
+					B20000010000000000000008 /* SearchServiceTests.swift */,
 				);
 				path = GroveTests;
 				sourceTree = "<group>";
@@ -422,6 +425,7 @@
 					A20000010000000000000004 /* AWSProfileStoreTests.swift in Sources */,
 					A20000010000000000000005 /* S3BrowserServiceTests.swift in Sources */,
 					A20000010000000000000006 /* BrowserCapabilityTests.swift in Sources */,
+					A20000010000000000000008 /* SearchServiceTests.swift in Sources */,
 				);
 				runOnlyForDeploymentPostprocessing = 0;
 			};

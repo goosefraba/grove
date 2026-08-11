@@ -3,6 +3,9 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     private var windowControllers: [BrowserWindowController] = []
+    private var didPresentArchiveQuarantineWarning = false
+    private var archiveQuarantineObserver: NSObjectProtocol?
+    var archiveQuarantineAlertPresenterForTesting: ((NSAlert) -> Void)?
     // States of browser windows closed since the last fresh session start.
     // Lets us restore the full last session when the user closes every window before quitting.
     private var closedWindowStates: [[String: Any]] = []
@@ -17,6 +20,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             name: NSWindow.willCloseNotification,
             object: nil
         )
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
+            beginObservingArchiveQuarantineAttention()
+            FileOperationService.shared.startArchiveQuarantineLifecycle()
+        }
 
         // Restore previous window states or open default
         if restoreWindowStates() {
@@ -45,6 +52,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
         true
+    }
+
+    deinit {
+        if let archiveQuarantineObserver {
+            NotificationCenter.default.removeObserver(archiveQuarantineObserver)
+        }
     }
 
     // MARK: - Window Management
@@ -90,6 +103,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // if every window is closed before the app quits. Persistence happens on terminate.
         closedWindowStates.append(windowControllers[index].saveState())
         windowControllers.remove(at: index)
+    }
+
+    func beginObservingArchiveQuarantineAttention() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard archiveQuarantineObserver == nil else { return }
+        archiveQuarantineObserver = NotificationCenter.default.addObserver(
+            forName: FileOperationService.archiveQuarantineNeedsAttentionNotification,
+            object: FileOperationService.shared,
+            queue: .main
+        ) { [weak self] notification in
+            self?.presentArchiveQuarantineAttention(notification)
+        }
+    }
+
+    private func presentArchiveQuarantineAttention(_ notification: Notification) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard !didPresentArchiveQuarantineWarning else { return }
+        didPresentArchiveQuarantineWarning = true
+        let recordCount = (notification.userInfo?["records"] as? [FileOperationService.ArchiveQuarantineRecord])?.count
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Archive cleanup needs attention"
+        alert.informativeText = recordCount.map {
+            "Grove safely retained \($0) archive cleanup item(s). Their contents were restricted; details remain available in Grove's cleanup registry."
+        } ?? "Grove could not complete or verify archive cleanup. Details remain available in Grove's cleanup registry."
+        if let archiveQuarantineAlertPresenterForTesting {
+            archiveQuarantineAlertPresenterForTesting(alert)
+        } else if let window = NSApp.keyWindow {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
     }
 
     // MARK: - Window State Save/Restore

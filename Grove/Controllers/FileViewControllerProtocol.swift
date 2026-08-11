@@ -40,12 +40,26 @@ protocol FileViewControllerProtocol: AnyObject {
 /// the pasteboard format the list view already uses.
 enum FileOperationClipboard {
     static let pasteboardType = NSPasteboard.PasteboardType("com.grove.file-operation")
+    private static let changeCoordinator = PasteboardChangeCoordinator.shared
 
     static func write(_ urls: [URL], isCut: Bool) {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.writeObjects(urls as [NSURL])
         pb.setString(isCut ? "cut" : "copy", forType: pasteboardType)
+        changeCoordinator.pasteboardDidChange()
+    }
+
+    static func writeString(_ string: String, forType type: NSPasteboard.PasteboardType = .string) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(string, forType: type)
+        changeCoordinator.pasteboardDidChange()
+    }
+
+    static func clear() {
+        NSPasteboard.general.clearContents()
+        changeCoordinator.pasteboardDidChange()
     }
 
     static func read() -> (urls: [URL], isCut: Bool)? {
@@ -53,6 +67,124 @@ enum FileOperationClipboard {
         guard let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
               !urls.isEmpty else { return nil }
         return (urls, pb.string(forType: pasteboardType) == "cut")
+    }
+
+    @discardableResult
+    static func observeChanges(_ handler: @escaping () -> Void) -> PasteboardChangeCoordinator.Observation {
+        changeCoordinator.observe(handler)
+    }
+}
+
+/// Watches the system pasteboard once for the whole app and fans changes out to live file lists.
+/// Grove writes are delivered synchronously; the single timer exists only while there are observers
+/// and catches replacements made by other applications.
+final class PasteboardChangeCoordinator {
+    static let shared = PasteboardChangeCoordinator()
+
+    final class Observation {
+        private weak var coordinator: PasteboardChangeCoordinator?
+        private let id: UUID
+        private var isCancelled = false
+
+        fileprivate init(coordinator: PasteboardChangeCoordinator, id: UUID) {
+            self.coordinator = coordinator
+            self.id = id
+        }
+
+        func cancel() {
+            guard !isCancelled else { return }
+            isCancelled = true
+            coordinator?.removeObserver(id)
+            coordinator = nil
+        }
+
+        deinit {
+            cancel()
+        }
+    }
+
+    private let changeCountProvider: () -> Int
+    private let pollingInterval: TimeInterval
+    private let notificationCenter: NotificationCenter?
+    private var observers: [UUID: () -> Void] = [:]
+    private var lastChangeCount: Int
+    private var timer: Timer?
+    private var activationObserver: NSObjectProtocol?
+
+    init(
+        changeCountProvider: @escaping () -> Int = { NSPasteboard.general.changeCount },
+        pollingInterval: TimeInterval = 0.5,
+        notificationCenter: NotificationCenter? = .default
+    ) {
+        self.changeCountProvider = changeCountProvider
+        self.pollingInterval = pollingInterval
+        self.notificationCenter = notificationCenter
+        self.lastChangeCount = changeCountProvider()
+    }
+
+    deinit {
+        stopMonitoring()
+    }
+
+    @discardableResult
+    func observe(_ handler: @escaping () -> Void) -> Observation {
+        let id = UUID()
+        observers[id] = handler
+        if observers.count == 1 {
+            startMonitoring()
+        }
+        return Observation(coordinator: self, id: id)
+    }
+
+    /// Call after a Grove-owned pasteboard mutation for immediate cross-window updates.
+    func pasteboardDidChange() {
+        detectChange()
+    }
+
+    /// Internal so focused tests can emulate an external application's pasteboard write.
+    func detectChange() {
+        let currentChangeCount = changeCountProvider()
+        guard currentChangeCount != lastChangeCount else { return }
+        lastChangeCount = currentChangeCount
+        let currentObservers = Array(observers.values)
+        currentObservers.forEach { $0() }
+    }
+
+    var observerCount: Int { observers.count }
+    var isMonitoring: Bool { timer != nil }
+
+    private func startMonitoring() {
+        lastChangeCount = changeCountProvider()
+
+        let timer = Timer(timeInterval: pollingInterval, repeats: true) { [weak self] _ in
+            self?.detectChange()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+
+        activationObserver = notificationCenter?.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.detectChange()
+        }
+    }
+
+    private func removeObserver(_ id: UUID) {
+        observers.removeValue(forKey: id)
+        if observers.isEmpty {
+            stopMonitoring()
+        }
+    }
+
+    private func stopMonitoring() {
+        timer?.invalidate()
+        timer = nil
+        if let activationObserver {
+            notificationCenter?.removeObserver(activationObserver)
+            self.activationObserver = nil
+        }
     }
 }
 
@@ -381,7 +513,7 @@ extension FileViewControllerProtocol where Self: NSViewController {
         do {
             if isCut {
                 _ = try FileOperationService.shared.move(urls, to: currentURL)
-                NSPasteboard.general.clearContents()
+                FileOperationClipboard.clear()
             } else {
                 _ = try FileOperationService.shared.copy(urls, to: currentURL)
             }
