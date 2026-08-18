@@ -394,6 +394,19 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
             return .move
         }
 
+        if Self.favoriteTransferDestination(
+            for: item as? SidebarItem,
+            childIndex: index
+        ) != nil {
+            guard info.draggingPasteboard.canReadObject(
+                forClasses: [NSURL.self],
+                options: [.urlReadingFileURLsOnly: true]
+            ) else {
+                return []
+            }
+            return FileDropOperationResolver.preferredOperation(from: info.draggingSourceOperationMask)
+        }
+
         guard let section = item as? SidebarSection, section == .favorites else {
             if let sidebarItem = item as? SidebarItem, sidebarItem.section == .favorites {
                 let favoritesSection = sections[0]
@@ -441,7 +454,112 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         if info.draggingPasteboard.types?.contains(Self.sidebarItemPasteboardType) == true {
             return acceptReorderDrop(info: info, targetIndex: index)
         }
+        if let destination = Self.favoriteTransferDestination(
+            for: item as? SidebarItem,
+            childIndex: index
+        ) {
+            return acceptFavoriteTransferDrop(info: info, destination: destination)
+        }
         return acceptExternalDrop(info: info, targetIndex: index)
+    }
+
+    static func favoriteTransferDestination(
+        for item: SidebarItem?,
+        childIndex: Int,
+        fileManager: FileManager = .default
+    ) -> URL? {
+        guard childIndex == NSOutlineViewDropOnItemIndex,
+              let item,
+              item.section == .favorites,
+              case .local(let destination) = item.location else {
+            return nil
+        }
+
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: destination.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            return nil
+        }
+        return destination.standardizedFileURL
+    }
+
+    private func acceptFavoriteTransferDrop(info: any NSDraggingInfo, destination: URL) -> Bool {
+        guard let urls = info.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL], !urls.isEmpty else {
+            return false
+        }
+
+        let operation = FileDropOperationResolver.preferredOperation(from: info.draggingSourceOperationMask)
+        guard !operation.isEmpty else { return false }
+        let isMove = FileDropOperationResolver.isMove(operation)
+        let actionName = isMove ? "Move" : "Copy"
+
+        FileTransferCoordinator.perform(
+            urls: urls,
+            to: destination,
+            isMove: isMove,
+            presenter: self
+        ) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let records):
+                self.registerUndoTransfer(records: records, actionName: actionName)
+            case .failure(let error):
+                self.registerUndoForCarriedRecords(from: error, actionName: actionName)
+                if !FileListViewController.isCancellation(error) {
+                    self.showError(error)
+                }
+            }
+        }
+        return true
+    }
+
+    private func registerUndoForCarriedRecords(from error: Error, actionName: String) {
+        switch error {
+        case FileOperationService.FileOperationError.partialFailure(let records, _),
+             FileOperationService.FileOperationError.cancelled(let records):
+            registerUndoTransfer(records: records, actionName: actionName)
+        default:
+            break
+        }
+    }
+
+    private func registerUndoTransfer(records: [FileOperationService.FileTransferRecord], actionName: String) {
+        let undoableRecords = records.filter(\.isUndoable)
+        guard !undoableRecords.isEmpty, let undoManager = view.window?.undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { target in
+            do {
+                try FileOperationService.shared.undoTransferRecords(undoableRecords)
+                target.registerRedoTransfer(records: undoableRecords, actionName: actionName)
+            } catch {
+                target.showError(error)
+            }
+        }
+        undoManager.setActionName(actionName)
+    }
+
+    private func registerRedoTransfer(records: [FileOperationService.FileTransferRecord], actionName: String) {
+        guard let undoManager = view.window?.undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { target in
+            do {
+                try FileOperationService.shared.redoTransferRecords(records)
+                target.registerUndoTransfer(records: records, actionName: actionName)
+            } catch {
+                target.showError(error)
+            }
+        }
+        undoManager.setActionName(actionName)
+    }
+
+    private func showError(_ error: Error) {
+        let alert = NSAlert(error: error)
+        if let window = view.window {
+            alert.beginSheetModal(for: window, completionHandler: nil)
+        } else {
+            alert.runModal()
+        }
     }
 
     private func acceptReorderDrop(info: any NSDraggingInfo, targetIndex: Int) -> Bool {

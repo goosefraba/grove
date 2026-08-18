@@ -64,6 +64,64 @@ final class BrowserCapabilityTests: XCTestCase {
         XCTAssertEqual(FileDropOperationResolver.preferredOperation(from: [.copy]), .copy)
     }
 
+    func testFavoriteRowDropTargetsItsDirectory() throws {
+        let destination = FileManager.default.temporaryDirectory
+            .appendingPathComponent("grove-sidebar-drop-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: destination) }
+
+        let favorite = SidebarItem(
+            title: "Drop Target",
+            url: destination,
+            systemImage: "folder",
+            section: .favorites,
+            isBuiltIn: false
+        )
+
+        XCTAssertEqual(
+            SidebarViewController.favoriteTransferDestination(
+                for: favorite,
+                childIndex: NSOutlineViewDropOnItemIndex
+            ),
+            destination.standardizedFileURL
+        )
+        XCTAssertNil(
+            SidebarViewController.favoriteTransferDestination(for: favorite, childIndex: 0),
+            "Dropping between rows must remain available for adding or reordering favorites"
+        )
+    }
+
+    func testFavoriteRowDropRejectsMissingAndNonFavoriteDestinations() throws {
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("grove-sidebar-missing-\(UUID().uuidString)", isDirectory: true)
+        let missingFavorite = SidebarItem(
+            title: "Missing",
+            url: missing,
+            systemImage: "folder",
+            section: .favorites,
+            isBuiltIn: false
+        )
+        let location = SidebarItem(
+            title: "Location",
+            url: FileManager.default.temporaryDirectory,
+            systemImage: "externaldrive",
+            section: .locations
+        )
+
+        XCTAssertNil(
+            SidebarViewController.favoriteTransferDestination(
+                for: missingFavorite,
+                childIndex: NSOutlineViewDropOnItemIndex
+            )
+        )
+        XCTAssertNil(
+            SidebarViewController.favoriteTransferDestination(
+                for: location,
+                childIndex: NSOutlineViewDropOnItemIndex
+            )
+        )
+    }
+
     func testTerminalChangeDirectoryScriptShellQuotesPath() {
         let url = URL(fileURLWithPath: "/tmp/Grove $(touch pwn) `echo bad` 'quoted'")
         let script = FileListViewController.terminalChangeDirectoryScript(for: url)
