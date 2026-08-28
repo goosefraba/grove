@@ -907,6 +907,14 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         guard let window = view.window else { return }
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn else { return }
+            defer {
+                // Do not rely solely on FSEvents to remove trashed items from the list.
+                // A successful trashItem call can move the item before the directory
+                // watcher delivers (or coalesces) its notification, leaving a stale row.
+                // Reloading also self-heals the view after a partial or already-missing
+                // failure while the error remains visible to the user.
+                self?.reloadContents(showLoadingIndicator: false)
+            }
             do {
                 let records = try FileOperationService.shared.moveToTrashRecords(urls)
                 self?.registerUndoTransfer(records: records, actionName: "Move to Trash")
@@ -1346,10 +1354,17 @@ extension FileListViewController: NSTextFieldDelegate {
             textField.isEditable = false
             editingRow = -1
             editingURL = nil
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.view.window?.makeFirstResponder(self.tableView)
+            }
             return true
         }
 
-        if newName != item.name && !newName.isEmpty {
+        let isBlank = newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if isBlank {
+            textField.stringValue = item.name
+        } else if newName != item.name {
             do {
                 let newURL = try FileOperationService.shared.rename(item.url, to: newName)
                 registerUndoTransfer(
@@ -1359,6 +1374,7 @@ extension FileListViewController: NSTextFieldDelegate {
                 pendingSelectionURL = newURL
                 reloadContents()
             } catch {
+                textField.stringValue = item.name
                 showError(error)
             }
         }
@@ -1366,6 +1382,10 @@ extension FileListViewController: NSTextFieldDelegate {
         textField.isEditable = false
         editingRow = -1
         editingURL = nil
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.view.window?.makeFirstResponder(self.tableView)
+        }
         return true
     }
 

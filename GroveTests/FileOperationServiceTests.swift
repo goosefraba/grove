@@ -59,6 +59,16 @@ final class FileOperationServiceTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: tempRoot.deletingLastPathComponent().appendingPathComponent("escaped.txt").path))
     }
 
+    func testRenameRejectsBlankNames() throws {
+        let file = tempRoot.appendingPathComponent("file.txt")
+        try "data".write(to: file, atomically: true, encoding: .utf8)
+
+        for blankName in ["", "   ", "\t"] {
+            XCTAssertThrowsError(try FileOperationService.shared.rename(file, to: blankName))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+        }
+    }
+
     func testArchiveAttentionPostedFromBackgroundPresentsOnceOnMainQueue() {
         let delegate = AppDelegate()
         let presented = expectation(description: "archive attention presented on main")

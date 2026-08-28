@@ -961,7 +961,7 @@ final class FileOperationService {
     }
 
     private func validatedFileName(_ name: String) throws -> String {
-        guard !name.isEmpty,
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               name != ".",
               name != "..",
               !name.contains("/"),
