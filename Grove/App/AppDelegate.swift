@@ -90,9 +90,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         guard let window = NSApp.keyWindow else { return }
         // Close all tabs in the window group, then the window itself
         let tabbedWindows = window.tabbedWindows ?? [window]
+        let closingControllers = tabbedWindows.compactMap { $0.windowController as? BrowserWindowController }
+        let closingStates = Self.sessionStates(for: closingControllers)
+        let priorClosedCount = closedWindowStates.count
         for tab in tabbedWindows {
             tab.close()
         }
+        closedWindowStates.replaceSubrange(priorClosedCount..., with: closingStates)
     }
 
     @objc private func windowDidClose(_ notification: Notification) {
@@ -145,7 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // quitting), fall back to the states captured as they closed. Never persist empty.
         let states = windowControllers.isEmpty
             ? closedWindowStates
-            : windowControllers.map { $0.saveState() }
+            : Self.sessionStates(for: windowControllers)
         guard !states.isEmpty else { return }
         UserDefaults.standard.set(states, forKey: BrowserWindowController.windowStatesKey)
     }
@@ -163,15 +167,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return false
         }
 
-        var restored = false
-        for state in states {
-            if let wc = BrowserWindowController.restoreState(from: state) {
-                wc.showWindow(nil)
-                windowControllers.append(wc)
-                restored = true
+        windowControllers = Self.restoreSession(states)
+        return !windowControllers.isEmpty
+    }
+
+    /// AppKit represents every tab as a window; persist their relationships separately.
+    static func sessionStates(for controllers: [BrowserWindowController]) -> [[String: Any]] {
+        var groupIDs: [ObjectIdentifier: String] = [:]
+        return controllers.map { controller in
+            var state = controller.saveState()
+            guard let window = controller.window else { return state }
+            let tabs = window.tabGroup?.windows ?? [window]
+            let groupKey = ObjectIdentifier(tabs.first ?? window)
+            let groupID = groupIDs[groupKey] ?? UUID().uuidString
+            groupIDs[groupKey] = groupID
+            state["tabGroup"] = groupID
+            state["tabIndex"] = tabs.firstIndex(of: window) ?? 0
+            state["selectedTab"] = (window.tabGroup?.selectedWindow ?? window) === window
+            return state
+        }
+    }
+
+    static func restoreSession(_ states: [[String: Any]]) -> [BrowserWindowController] {
+        var groups: [(id: String, entries: [(state: [String: Any], controller: BrowserWindowController)])] = []
+        for (index, state) in states.enumerated() {
+            guard let controller = BrowserWindowController.restoreState(from: state) else { continue }
+            // Legacy states lack group information: preserve them as separate windows.
+            let id = state["tabGroup"] as? String ?? "legacy-\(index)"
+            if let groupIndex = groups.firstIndex(where: { $0.id == id }) {
+                groups[groupIndex].entries.append((state, controller))
+            } else {
+                groups.append((id, [(state, controller)]))
             }
         }
-        return restored
+
+        // Do not let the system tabbing preference merge independently saved windows.
+        let automaticTabbing = NSWindow.allowsAutomaticWindowTabbing
+        NSWindow.allowsAutomaticWindowTabbing = false
+        defer { NSWindow.allowsAutomaticWindowTabbing = automaticTabbing }
+        var controllers: [BrowserWindowController] = []
+        for group in groups {
+            let entries = group.entries.sorted {
+                ($0.state["tabIndex"] as? Int ?? 0) < ($1.state["tabIndex"] as? Int ?? 0)
+            }
+            guard let first = entries.first, let window = first.controller.window else { continue }
+            first.controller.showWindow(nil)
+            var previous = window
+            for entry in entries.dropFirst() {
+                guard let tab = entry.controller.window else { continue }
+                previous.addTabbedWindow(tab, ordered: .above)
+                previous = tab
+            }
+            let selected = entries.first { $0.state["selectedTab"] as? Bool == true } ?? first
+            if let selectedWindow = selected.controller.window {
+                window.tabGroup?.selectedWindow = selectedWindow
+                selectedWindow.makeKeyAndOrderFront(nil)
+            }
+            controllers.append(contentsOf: entries.map(\.controller))
+        }
+        return controllers
     }
 
     // MARK: - Menu Actions

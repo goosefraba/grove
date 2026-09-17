@@ -4,6 +4,51 @@ import AppKit
 
 final class BrowserCapabilityTests: XCTestCase {
     @MainActor
+    func testSessionRestoresTabGroupsOrderSelectionAndPaths() throws {
+        let a = BrowserWindowController(initialURL: URL(fileURLWithPath: "/"))
+        let b = BrowserWindowController(initialURL: URL(fileURLWithPath: "/Applications"))
+        let c = BrowserWindowController(initialURL: URL(fileURLWithPath: "/Users"))
+        let original = [a, b, c]
+        let automatic = NSWindow.allowsAutomaticWindowTabbing
+        NSWindow.allowsAutomaticWindowTabbing = false
+        defer { NSWindow.allowsAutomaticWindowTabbing = automatic }
+        a.showWindow(nil)
+        a.window!.addTabbedWindow(b.window!, ordered: .above)
+        a.window!.tabGroup?.selectedWindow = b.window
+        c.showWindow(nil)
+        // Controller creation order need not match the user's tab order.
+        let states = AppDelegate.sessionStates(for: [b, c, a])
+        original.forEach { $0.close() }
+        let data = try PropertyListSerialization.data(fromPropertyList: states, format: .binary, options: 0)
+        let decoded = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [[String: Any]])
+        let restored = AppDelegate.restoreSession(decoded)
+        defer { restored.forEach { $0.close() } }
+        XCTAssertEqual(restored.count, 3)
+        let root = try XCTUnwrap(restored.first { $0.currentURL.path == "/" })
+        let apps = try XCTUnwrap(restored.first { $0.currentURL.path == "/Applications" })
+        let users = try XCTUnwrap(restored.first { $0.currentURL.path == "/Users" })
+        XCTAssertEqual(root.window?.tabGroup?.windows, [root.window!, apps.window!])
+        XCTAssertTrue(root.window?.tabGroup?.selectedWindow === apps.window)
+        XCTAssertFalse(root.window?.tabGroup?.windows.contains(users.window!) ?? true)
+    }
+
+    @MainActor
+    func testLegacySessionAndMissingSelectedTabRestoreSafely() throws {
+        let states: [[String: Any]] = [
+            ["currentURL": "/", "tabGroup": "one", "tabIndex": 0],
+            ["currentURL": "/nonexistent-grove-session-\(UUID())", "tabGroup": "one", "tabIndex": 1, "selectedTab": true],
+            ["currentURL": "/Applications"],
+            ["currentURL": "/Users"],
+        ]
+        let restored = AppDelegate.restoreSession(states)
+        defer { restored.forEach { $0.close() } }
+        XCTAssertEqual(restored.map { $0.currentURL.path }, ["/", "/Applications", "/Users"])
+        for controller in restored {
+            XCTAssertLessThanOrEqual(controller.window?.tabGroup?.windows.count ?? 1, 1)
+        }
+    }
+
+    @MainActor
     func testBrowserContentStaysBelowCompactToolbarSafeArea() throws {
         let controller = BrowserWindowController()
         defer { controller.window?.close() }
