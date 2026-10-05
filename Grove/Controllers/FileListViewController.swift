@@ -1424,6 +1424,9 @@ extension FileListViewController: NSMenuDelegate {
             }
 
             menu.addItem(.separator())
+            menu.addItem(makeCopyPathMenuItem(for: currentURL))
+
+            menu.addItem(.separator())
             let infoItem = menu.addItem(withTitle: "Get Info", action: #selector(contextGetInfoCurrentFolder(_:)), keyEquivalent: "")
             infoItem.target = self
 
@@ -1456,18 +1459,7 @@ extension FileListViewController: NSMenuDelegate {
         menu.addItem(withTitle: "Duplicate", action: #selector(contextDuplicate(_:)), keyEquivalent: "")
         menu.addItem(.separator())
 
-        // Copy Path submenu
-        let copyPathSubmenu = NSMenu()
-        addCopyPathMenuItem(to: copyPathSubmenu, format: .unix, action: #selector(contextCopyUnixPath(_:)))
-        addCopyPathMenuItem(to: copyPathSubmenu, format: .hfs, action: #selector(contextCopyHFSPath(_:)))
-        addCopyPathMenuItem(to: copyPathSubmenu, format: .windows, action: #selector(contextCopyWindowsPath(_:)))
-        addCopyPathMenuItem(to: copyPathSubmenu, format: .terminal, action: #selector(contextCopyTerminalPath(_:)))
-        addCopyPathMenuItem(to: copyPathSubmenu, format: .url, action: #selector(contextCopyURLPath(_:)))
-        addCopyPathMenuItem(to: copyPathSubmenu, format: .name, action: #selector(contextCopyName(_:)))
-
-        let copyPathItem = NSMenuItem(title: "Copy Path", action: nil, keyEquivalent: "")
-        copyPathItem.submenu = copyPathSubmenu
-        menu.addItem(copyPathItem)
+        menu.addItem(makeCopyPathMenuItem())
 
         menu.addItem(.separator())
         menu.addItem(withTitle: "Rename", action: #selector(contextRename(_:)), keyEquivalent: "")
@@ -1650,38 +1642,59 @@ extension FileListViewController: NSMenuDelegate {
 
     // MARK: - Copy Path
 
-    private func addCopyPathMenuItem(to menu: NSMenu, format: PathCopyFormat, action: Selector) {
-        let item = menu.addItem(withTitle: format.menuTitle, action: action, keyEquivalent: "")
-        item.target = self
+    private func makeCopyPathMenuItem(for url: URL? = nil) -> NSMenuItem {
+        let submenu = NSMenu()
+        let formats: [(PathCopyFormat, Selector)] = [
+            (.unix, #selector(contextCopyUnixPath(_:))),
+            (.hfs, #selector(contextCopyHFSPath(_:))),
+            (.windows, #selector(contextCopyWindowsPath(_:))),
+            (.terminal, #selector(contextCopyTerminalPath(_:))),
+            (.url, #selector(contextCopyURLPath(_:))),
+            (.name, #selector(contextCopyName(_:))),
+        ]
+        for (format, action) in formats {
+            let item = submenu.addItem(withTitle: format.menuTitle, action: action, keyEquivalent: "")
+            item.target = self
+            item.representedObject = url
+        }
+        let item = NSMenuItem(title: "Copy Path", action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        return item
     }
 
     @objc private func contextCopyUnixPath(_ sender: Any?) {
-        copySelectedPaths(format: .unix)
+        copyPaths(format: .unix, sender: sender)
     }
 
     @objc private func contextCopyHFSPath(_ sender: Any?) {
-        copySelectedPaths(format: .hfs)
+        copyPaths(format: .hfs, sender: sender)
     }
 
     @objc private func contextCopyWindowsPath(_ sender: Any?) {
-        copySelectedPaths(format: .windows)
+        copyPaths(format: .windows, sender: sender)
     }
 
     @objc private func contextCopyTerminalPath(_ sender: Any?) {
-        copySelectedPaths(format: .terminal)
+        copyPaths(format: .terminal, sender: sender)
     }
 
     @objc private func contextCopyURLPath(_ sender: Any?) {
-        copySelectedPaths(format: .url)
+        copyPaths(format: .url, sender: sender)
     }
 
     @objc private func contextCopyName(_ sender: Any?) {
-        copySelectedPaths(format: .name)
+        copyPaths(format: .name, sender: sender)
     }
 
-    private func copySelectedPaths(format: PathCopyFormat) {
-        let paths = selectedItems.map { PathCopyFormatter.string(for: $0.url, format: format) }
-        guard !paths.isEmpty else { return }
+    private func copyPaths(format: PathCopyFormat, sender: Any?) {
+        let urls: [URL]
+        if let url = (sender as? NSMenuItem)?.representedObject as? URL {
+            urls = [url]
+        } else {
+            urls = selectedItems.map(\.url)
+        }
+        guard !urls.isEmpty else { return }
+        let paths = urls.map { PathCopyFormatter.string(for: $0, format: format) }
         FileOperationClipboard.writeString(paths.joined(separator: "\n"))
     }
 
