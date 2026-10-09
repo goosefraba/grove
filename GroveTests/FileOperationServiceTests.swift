@@ -59,6 +59,33 @@ final class FileOperationServiceTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: tempRoot.deletingLastPathComponent().appendingPathComponent("escaped.txt").path))
     }
 
+    func testArchivePhasesReachFinishingBeforeCompletion() throws {
+        let source = tempRoot.appendingPathComponent("phase-source.txt")
+        try Data("archive phases".utf8).write(to: source)
+        let archive = tempRoot.appendingPathComponent("phase-source.zip")
+        var compressionPhases: [FileOperationService.ArchivePhase] = []
+        let compressed = expectation(description: "compressed with phases")
+        FileOperationService.shared.compress([source], to: archive, phaseChanged: {
+            compressionPhases.append($0)
+        }) { result in
+            if case .failure(let error) = result { XCTFail("Compression failed: \(error)") }
+            XCTAssertEqual(compressionPhases, [.preparing, .compressing, .finishing])
+            compressed.fulfill()
+        }
+        wait(for: [compressed], timeout: 15)
+
+        var extractionPhases: [FileOperationService.ArchivePhase] = []
+        let extracted = expectation(description: "extracted with phases")
+        FileOperationService.shared.decompressToUniqueFolder(archive, phaseChanged: {
+            extractionPhases.append($0)
+        }) { result in
+            if case .failure(let error) = result { XCTFail("Extraction failed: \(error)") }
+            XCTAssertEqual(extractionPhases, [.preparing, .extracting, .finishing])
+            extracted.fulfill()
+        }
+        wait(for: [extracted], timeout: 15)
+    }
+
     func testRenameRejectsBlankNames() throws {
         let file = tempRoot.appendingPathComponent("file.txt")
         try "data".write(to: file, atomically: true, encoding: .utf8)

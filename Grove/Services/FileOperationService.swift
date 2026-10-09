@@ -9,6 +9,26 @@ private func groveACLDeleteFD(_ descriptor: Int32, _ type: acl_type_t) -> Int32
 
 final class FileOperationService {
 
+    /// Archive tools do not report dependable byte progress. These phases are sent from the
+    /// background operation queue; callers marshal UI updates onto the main queue.
+    enum ArchivePhase: Equatable {
+        case preparing
+        case compressing
+        case extracting
+        case restoringMetadata
+        case finishing
+
+        var statusText: String {
+            switch self {
+            case .preparing: return "Preparing…"
+            case .compressing: return "Writing ZIP archive…"
+            case .extracting: return "Extracting files…"
+            case .restoringMetadata: return "Restoring file metadata…"
+            case .finishing: return "Finishing…"
+            }
+        }
+    }
+
     enum ArchiveSanitationFailureStage {
         case directory
         case regular
@@ -1052,6 +1072,7 @@ final class FileOperationService {
         password: String?,
         operationTimeout: TimeInterval?,
         cancellationRequested: @escaping () -> Bool,
+        phaseChanged: ((ArchivePhase) -> Void)?,
         hooks: ArchiveExtractionHooks
     ) throws {
         let archiveMetadataDirectoryName = try encryptedArchiveMetadataLocator(in: archiveURL)
@@ -1107,6 +1128,7 @@ final class FileOperationService {
                 name: transactionHandle.name
             )
             if let password, !password.isEmpty {
+                phaseChanged?(.extracting)
                 try runPasswordProtectedArchiveTool(
                     "/usr/bin/unzip",
                     arguments: ["-o", archiveURL.path, "-d", boundTransactionDirectory.path],
@@ -1118,6 +1140,7 @@ final class FileOperationService {
                     cancellationRequested: cancellationRequested
                 )
             } else {
+                phaseChanged?(.extracting)
                 try runArchiveTool(
                     "/usr/bin/ditto",
                     arguments: ["-x", "-k", archiveURL.path, boundTransactionDirectory.path],
@@ -1127,6 +1150,7 @@ final class FileOperationService {
                 )
             }
             if let metadataDirectoryName = archiveMetadataDirectoryName {
+                phaseChanged?(.restoringMetadata)
                 try rehydrateEncryptedArchiveMetadata(
                     in: boundTransactionDirectory,
                     metadataDirectoryName: metadataDirectoryName,
@@ -1136,6 +1160,7 @@ final class FileOperationService {
             guard !cancellationRequested() else {
                 throw archiveCancellationError(domain: "com.grove.decompress")
             }
+            phaseChanged?(.finishing)
             try transactionallyMergeExtractedArchive(
                 boundTransactionDirectory,
                 into: destinationDir,
@@ -1158,6 +1183,7 @@ final class FileOperationService {
                 reportPostCommitArchiveCleanupWarning(error, hooks: hooks)
             }
         } else {
+            phaseChanged?(.extracting)
             try runArchiveTool(
                 "/usr/bin/ditto",
                 arguments: ["-x", "-k", archiveURL.path, destinationDir.path],
@@ -1165,6 +1191,7 @@ final class FileOperationService {
                 fallbackMessage: "Decompression failed",
                 cancellationRequested: cancellationRequested
             )
+            phaseChanged?(.finishing)
         }
     }
 
@@ -4191,6 +4218,7 @@ final class FileOperationService {
         password: String? = nil,
         operationTimeout: TimeInterval? = nil,
         cancellationRequested: @escaping () -> Bool = { false },
+        phaseChanged: ((ArchivePhase) -> Void)? = nil,
         archiveToolStarted: ((pid_t) -> Void)? = nil,
         archiveChildStarted: ((pid_t) -> Void)? = nil,
         hooks: ArchiveCompressionHooks = ArchiveCompressionHooks(),
@@ -4199,6 +4227,7 @@ final class FileOperationService {
         backgroundQueue.async {
             let result: Result<URL, Error> = {
                 do {
+                phaseChanged?(.preparing)
                 guard !cancellationRequested() else {
                     throw self.archiveCancellationError()
                 }
@@ -4226,6 +4255,8 @@ final class FileOperationService {
                 guard !cancellationRequested() else {
                     throw self.archiveCancellationError()
                 }
+
+                phaseChanged?(.compressing)
 
                 if let password = password, !password.isEmpty {
                     if let encryptedArchiveTransformer = hooks.encryptedArchiveTransformer {
@@ -4278,6 +4309,7 @@ final class FileOperationService {
                 guard !cancellationRequested() else {
                     throw self.archiveCancellationError()
                 }
+                phaseChanged?(.finishing)
                 try self.promoteArchive(temporaryArchive, to: archiveURL)
 
                     return .success(archiveURL)
@@ -4855,6 +4887,7 @@ final class FileOperationService {
         password: String? = nil,
         operationTimeout: TimeInterval? = nil,
         cancellationRequested: @escaping () -> Bool = { false },
+        phaseChanged: ((ArchivePhase) -> Void)? = nil,
         hooks: ArchiveExtractionHooks = ArchiveExtractionHooks(),
         completion: @escaping (Result<URL, Error>) -> Void
     ) {
@@ -4862,6 +4895,10 @@ final class FileOperationService {
             var destinationDir: URL?
 
             do {
+                phaseChanged?(.preparing)
+                guard !cancellationRequested() else {
+                    throw self.archiveCancellationError(domain: "com.grove.decompress")
+                }
                 let parentDir = archiveURL.deletingLastPathComponent()
                 let folderName = self.archiveExtractionFolderName(for: archiveURL)
                 let createdDir = try self.createUniqueDirectory(named: folderName, in: parentDir)
@@ -4873,6 +4910,7 @@ final class FileOperationService {
                     password: password,
                     operationTimeout: operationTimeout,
                     cancellationRequested: cancellationRequested,
+                    phaseChanged: phaseChanged,
                     hooks: hooks
                 )
 
@@ -4892,17 +4930,20 @@ final class FileOperationService {
         password: String? = nil,
         operationTimeout: TimeInterval? = nil,
         cancellationRequested: @escaping () -> Bool = { false },
+        phaseChanged: ((ArchivePhase) -> Void)? = nil,
         hooks: ArchiveExtractionHooks = ArchiveExtractionHooks(),
         completion: @escaping (Result<URL, Error>) -> Void
     ) {
         backgroundQueue.async {
             do {
+                phaseChanged?(.preparing)
                 try self.extractArchive(
                     archiveURL,
                     to: destinationDir,
                     password: password,
                     operationTimeout: operationTimeout,
                     cancellationRequested: cancellationRequested,
+                    phaseChanged: phaseChanged,
                     hooks: hooks
                 )
 

@@ -113,7 +113,9 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     private let scrollView = FileListScrollView()
     private let tableView = FileListTableView()
     private let statusBar = NSTextField(labelWithString: "")
-    private let emptyLabel = NSTextField(labelWithString: "Empty Folder")
+    private let emptyLabel = NSTextField(wrappingLabelWithString: "Empty Folder")
+    private let accessActions = NSStackView()
+    private var directoryLoadError: Error?
     private let searchScopeLabel = NSTextField(labelWithString: "")
     private let loadingSpinner = NSProgressIndicator()
     private let directoryHeader = NSView()
@@ -374,16 +376,96 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
     private func setupEmptyLabel() {
         emptyLabel.font = .systemFont(ofSize: GroveUI.emptyFontSize)
-        emptyLabel.textColor = .tertiaryLabelColor
+        emptyLabel.textColor = .secondaryLabelColor
         emptyLabel.alignment = .center
+        emptyLabel.maximumNumberOfLines = 0
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
         emptyLabel.isHidden = true
         view.addSubview(emptyLabel)
 
+        accessActions.orientation = .vertical
+        accessActions.alignment = .centerX
+        accessActions.spacing = 10
+        accessActions.translatesAutoresizingMaskIntoConstraints = false
+        accessActions.isHidden = true
+        for (title, action, identifier) in [
+            ("Grant Folder Access…", #selector(grantFolderAccess(_:)), "grantFolderAccess"),
+            ("Privacy Settings…", #selector(openFolderPrivacySettings(_:)), "folderPrivacySettings"),
+            ("Retry", #selector(retryFolderAccess(_:)), "retryFolderAccess"),
+        ] {
+            let button = NSButton(title: title, target: self, action: action)
+            button.bezelStyle = .rounded
+            button.setAccessibilityIdentifier(identifier)
+            accessActions.addArrangedSubview(button)
+        }
+        view.addSubview(accessActions)
+
         NSLayoutConstraint.activate([
             emptyLabel.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
             emptyLabel.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
+            emptyLabel.widthAnchor.constraint(lessThanOrEqualTo: scrollView.widthAnchor, constant: -32),
+            accessActions.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
+            accessActions.topAnchor.constraint(equalTo: emptyLabel.bottomAnchor, constant: 16),
         ])
+    }
+
+    @objc private func grantFolderAccess(_ sender: Any?) {
+        guard let window = view.window else { return }
+        let requestedURL = currentURL.standardizedFileURL
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = requestedURL
+        panel.prompt = "Grant Access"
+        panel.message = "Choose \(requestedURL.lastPathComponent) to let Grove access this folder."
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .OK, let selectedURL = panel.url,
+                  self.currentURL.standardizedFileURL == requestedURL else { return }
+            if selectedURL.standardizedFileURL == requestedURL {
+                self.reloadContents(showLoadingIndicator: true)
+            } else {
+                self.delegate?.fileListDidNavigate(to: selectedURL)
+            }
+        }
+    }
+
+    @objc private func openFolderPrivacySettings(_ sender: Any?) {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func retryFolderAccess(_ sender: Any?) {
+        reloadContents(showLoadingIndicator: true)
+    }
+
+    static func isFolderPermissionError(_ error: Error) -> Bool {
+        let error = error as NSError
+        if error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoPermissionError {
+            return true
+        }
+        if error.domain == NSPOSIXErrorDomain && (error.code == Int(EACCES) || error.code == Int(EPERM)) {
+            return true
+        }
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? Error {
+            return isFolderPermissionError(underlying)
+        }
+        return false
+    }
+
+    func showDirectoryLoadError(_ error: Error) {
+        directoryLoadError = error
+        allItems = []
+        items = []
+        tableView.reloadData()
+        updateStatusBar()
+        let needsAccess = Self.isFolderPermissionError(error)
+        emptyLabel.stringValue = needsAccess
+            ? "Grove doesn’t have access to this folder.\nGrant folder access, or enable Grove in Privacy & Security → Files and Folders, then retry."
+            : "Unable to load folder contents."
+        accessActions.isHidden = !needsAccess
+        emptyLabel.isHidden = false
+        delegate?.fileListDidSelect(items: [])
     }
 
     private func setupLoadingSpinner() {
@@ -455,6 +537,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     }
 
     func applyFilter() {
+        guard directoryLoadError == nil else { return }
         let selectedURLs = Set(selectedItems.map(\.url))
         if filterText.isEmpty {
             items = allItems
@@ -474,6 +557,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
     }
 
     func performSpotlightSearch(_ query: String) {
+        guard directoryLoadError == nil else { return }
         guard !query.isEmpty else {
             clearSearch()
             return
@@ -525,6 +609,8 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
     func loadDirectory(_ url: URL) {
         reloadWorkItem?.cancel()
+        directoryLoadError = nil
+        accessActions.isHidden = true
         currentURL = url
         refreshDirectoryCapacity()
         updateDirectoryHeader()
@@ -584,6 +670,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         loadingSpinner.stopAnimation(nil)
         loadingSpinner.isHidden = true
         emptyLabel.isHidden = true
+        accessActions.isHidden = true
 
         if showLoadingIndicator {
             let work = DispatchWorkItem { [weak self] in
@@ -606,6 +693,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
             switch result {
             case .success(let loadedItems):
+                self.directoryLoadError = nil
                 self.allItems = loadedItems
                 self.applyFilter()
                 self.restoreSelection(previouslySelectedURLs: selectedURLs)
@@ -615,16 +703,7 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
                 }
                 // Folder sizes calculated on-demand for visible rows only
             case .failure(let error):
-                self.allItems = []
-                self.items = []
-                self.tableView.reloadData()
-                self.updateStatusBar()
-                if let nsError = error as NSError?, nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoPermissionError {
-                    self.emptyLabel.stringValue = "You don't have permission to access this folder."
-                } else {
-                    self.emptyLabel.stringValue = "Unable to load folder contents."
-                }
-                self.emptyLabel.isHidden = false
+                self.showDirectoryLoadError(error)
             }
         }
     }
@@ -770,6 +849,10 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
             selectedItemCount: selectedCount,
             availableDiskSpace: diskSpace
         )
+        if let directoryLoadError {
+            statusBar.stringValue = Self.isFolderPermissionError(directoryLoadError)
+                ? "Folder access required" : "Unable to load folder contents"
+        }
         updateDirectoryHeader()
         LocalFooterDiskSpaceCache.shared.refreshIfNeeded(at: currentURL) { [weak self] refreshedURL in
             guard let self,
@@ -782,6 +865,10 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
         directoryTitleLabel.stringValue = currentURL.displayName
         directoryTitleLabel.toolTip = currentURL.path
         directoryCountLabel.stringValue = items.count == 1 ? "1 item" : "\(items.count) items"
+        if let directoryLoadError {
+            directoryCountLabel.stringValue = Self.isFolderPermissionError(directoryLoadError)
+                ? "Access required" : "Unavailable"
+        }
         directoryCapacityLabel.stringValue = LocalFooterDiskSpaceCache.shared.diskSpace(at: currentURL) ?? ""
 
         if let directoryStorageUsage {
@@ -1151,6 +1238,11 @@ final class FileListViewController: NSViewController, FileViewControllerProtocol
 
     static func isCancellation(_ error: Error) -> Bool {
         if case FileOperationService.FileOperationError.cancelled = error { return true }
+        let nsError = error as NSError
+        if nsError.code == NSUserCancelledError &&
+            (nsError.domain == "com.grove.compress" || nsError.domain == "com.grove.decompress") {
+            return true
+        }
         return false
     }
 
@@ -1889,15 +1981,78 @@ extension FileListViewController: NSMenuDelegate {
     }
 
     private func extractArchives(_ urls: [URL], password: String?) {
-        for url in urls {
-            FileOperationService.shared.decompressToUniqueFolder(url, password: password) { [weak self] result in
-                switch result {
-                case .success:
-                    self?.reloadContents()
-                case .failure(let error):
-                    self?.showError(error)
+        guard !urls.isEmpty else { return }
+        let progressVC = FileProgressViewController()
+        progressVC.configureArchive(
+            title: "Extracting “\(urls[0].lastPathComponent)”",
+            detail: "Archive 1 of \(urls.count) · Preparing…"
+        )
+        presentAsSheet(progressVC)
+        extractNextArchive(urls, password: password, index: 0, failures: [], progressVC: progressVC)
+    }
+
+    private func extractNextArchive(
+        _ urls: [URL],
+        password: String?,
+        index: Int,
+        failures: [(URL, Error)],
+        progressVC: FileProgressViewController
+    ) {
+        guard index < urls.count, !progressVC.isCancelled else {
+            dismiss(progressVC)
+            reloadContents()
+            if !failures.isEmpty {
+                DispatchQueue.main.async { [weak self] in self?.showArchiveFailures(failures) }
+            }
+            return
+        }
+
+        let url = urls[index]
+        let title = "Extracting “\(url.lastPathComponent)”"
+        let position = "Archive \(index + 1) of \(urls.count)"
+        progressVC.updateArchive(title: title, detail: "\(position) · Preparing…")
+        FileOperationService.shared.decompressToUniqueFolder(
+            url,
+            password: password,
+            cancellationRequested: { progressVC.isCancelled },
+            phaseChanged: { phase in
+                DispatchQueue.main.async {
+                    progressVC.updateArchive(title: title, detail: "\(position) · \(phase.statusText)")
                 }
             }
+        ) { [weak self] result in
+            guard let self else { return }
+            var nextFailures = failures
+            if case .failure(let error) = result {
+                if Self.isCancellation(error) {
+                    self.extractNextArchive(
+                        urls, password: password, index: urls.count,
+                        failures: nextFailures, progressVC: progressVC
+                    )
+                    return
+                }
+                nextFailures.append((url, error))
+            }
+            self.extractNextArchive(
+                urls,
+                password: password,
+                index: index + 1,
+                failures: nextFailures,
+                progressVC: progressVC
+            )
+        }
+    }
+
+    private func showArchiveFailures(_ failures: [(URL, Error)]) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = failures.count == 1 ? "Couldn’t extract an archive" : "Couldn’t extract \(failures.count) archives"
+        alert.informativeText = failures.map { "\($0.0.lastPathComponent): \($0.1.localizedDescription)" }
+            .joined(separator: "\n")
+        if let window = view.window {
+            alert.beginSheetModal(for: window, completionHandler: nil)
+        } else {
+            alert.runModal()
         }
     }
 
@@ -1959,12 +2114,32 @@ extension FileListViewController: NSMenuDelegate {
                 counter += 1
             }
 
-            FileOperationService.shared.compress(urls, to: archiveURL, level: level, password: password) { [weak self] result in
+            let progressVC = FileProgressViewController()
+            let title = "Compressing “\(archiveURL.lastPathComponent)”"
+            progressVC.configureArchive(title: title)
+            self.presentAsSheet(progressVC)
+
+            FileOperationService.shared.compress(
+                urls,
+                to: archiveURL,
+                level: level,
+                password: password,
+                cancellationRequested: { progressVC.isCancelled },
+                phaseChanged: { phase in
+                    DispatchQueue.main.async {
+                        progressVC.updateArchive(title: title, detail: phase.statusText)
+                    }
+                }
+            ) { [weak self] result in
+                guard let self else { return }
+                self.dismiss(progressVC)
                 switch result {
                 case .success:
-                    self?.reloadContents()
+                    self.reloadContents()
                 case .failure(let error):
-                    self?.showError(error)
+                    if !Self.isCancellation(error) {
+                        DispatchQueue.main.async { [weak self] in self?.showError(error) }
+                    }
                 }
             }
         }

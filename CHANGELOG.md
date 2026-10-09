@@ -8,6 +8,13 @@ The format is intentionally simple and optimized for a small native app project.
 
 - No unreleased entries yet.
 
+## 1.0.4 - 2026-10-09
+
+### Changed
+
+- Show cancellable status sheets while compressing and extracting ZIP archives, including each archive's place in a batch.
+- Show folder-access recovery actions when macOS denies access to a selected directory.
+
 ## 0.1.0 - 2026-04-13
 
 First public open-source release.

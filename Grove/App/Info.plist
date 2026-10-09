@@ -32,5 +32,15 @@
 	<string>Copyright © 2026 Grove contributors.</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Grove needs permission to control Terminal so it can open the selected folder in a new Terminal session.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Grove needs access to Documents to browse and manage the files you choose.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Grove needs access to Desktop to browse and manage the files you choose.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Grove needs access to Downloads to browse and manage the files you choose.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Grove needs access to network volumes to browse and manage the files you choose.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Grove needs access to removable volumes to browse and manage the files you choose.</string>
 </dict>
 </plist>

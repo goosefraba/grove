@@ -3,6 +3,95 @@ import AppKit
 @testable import Grove
 
 final class BrowserCapabilityTests: XCTestCase {
+    func testArchiveCancellationUsesArchiveErrorCodeAndDomain() {
+        XCTAssertTrue(FileListViewController.isCancellation(
+            NSError(domain: "com.grove.compress", code: NSUserCancelledError)
+        ))
+        XCTAssertTrue(FileListViewController.isCancellation(
+            NSError(domain: "com.grove.decompress", code: NSUserCancelledError)
+        ))
+        XCTAssertFalse(FileListViewController.isCancellation(
+            NSError(domain: "com.grove.decompress", code: Int(EIO))
+        ))
+    }
+
+    @MainActor
+    func testArchiveProgressIsVisibleImmediatelyAndCancelKeepsStatus() throws {
+        let controller = FileProgressViewController()
+        controller.configureArchive(title: "Extracting “large archive.zip”", detail: "Archive 1 of 2 · Preparing…")
+        let views = Self.descendants(of: controller.view)
+        let bar = try XCTUnwrap(views.compactMap { $0 as? NSProgressIndicator }.first {
+            $0.accessibilityIdentifier() == "fileOperationProgress"
+        })
+        let title = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first {
+            $0.accessibilityIdentifier() == "fileOperationTitle"
+        })
+        let detail = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first {
+            $0.accessibilityIdentifier() == "fileOperationDetail"
+        })
+        let cancel = try XCTUnwrap(views.compactMap { $0 as? NSButton }.first {
+            $0.accessibilityIdentifier() == "fileOperationCancel"
+        })
+        XCTAssertTrue(bar.isIndeterminate)
+        XCTAssertEqual(title.stringValue, "Extracting “large archive.zip”")
+        XCTAssertEqual(detail.stringValue, "Archive 1 of 2 · Preparing…")
+        XCTAssertFalse(detail.isHidden)
+
+        cancel.performClick(nil)
+        controller.updateArchive(title: "Stale update", detail: "Finishing…")
+        XCTAssertTrue(controller.isCancelled)
+        XCTAssertFalse(cancel.isEnabled)
+        XCTAssertEqual(title.stringValue, "Extracting “large archive.zip”")
+        XCTAssertEqual(detail.stringValue, "Cancelling and cleaning up…")
+
+        let copyController = FileProgressViewController()
+        copyController.loadViewIfNeeded()
+        let copyBar = try XCTUnwrap(Self.descendants(of: copyController.view).compactMap { $0 as? NSProgressIndicator }.first)
+        XCTAssertFalse(copyBar.isIndeterminate)
+    }
+
+    func testFolderPermissionErrorsIncludeWrappedPOSIXDenials() {
+        XCTAssertTrue(FileListViewController.isFolderPermissionError(
+            NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoPermissionError)
+        ))
+        for code in [EACCES, EPERM] {
+            let underlying = NSError(domain: NSPOSIXErrorDomain, code: Int(code))
+            let wrapped = NSError(domain: NSCocoaErrorDomain, code: NSFileReadUnknownError,
+                                  userInfo: [NSUnderlyingErrorKey: underlying])
+            XCTAssertTrue(FileListViewController.isFolderPermissionError(wrapped))
+        }
+        XCTAssertFalse(FileListViewController.isFolderPermissionError(
+            NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoSuchFileError)
+        ))
+    }
+
+    @MainActor
+    func testDeniedFolderKeepsRecoveryControlsWhenFilteringAndClearsOnNavigation() throws {
+        let controller = FileListViewController()
+        controller.loadViewIfNeeded()
+        controller.showDirectoryLoadError(NSError(domain: NSCocoaErrorDomain, code: NSFileReadNoPermissionError))
+        let views = Self.descendants(of: controller.view)
+        let label = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first {
+            $0.accessibilityIdentifier() == "fileListEmptyLabel"
+        })
+        let status = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first {
+            $0.accessibilityIdentifier() == "fileListStatusBar"
+        })
+        let grant = try XCTUnwrap(views.compactMap { $0 as? NSButton }.first {
+            $0.accessibilityIdentifier() == "grantFolderAccess"
+        })
+        controller.filterText = "invoice"
+        controller.performSpotlightSearch("invoice")
+        XCTAssertTrue(label.stringValue.contains("Grove doesn’t have access"))
+        XCTAssertFalse(label.isHidden)
+        XCTAssertEqual(status.stringValue, "Folder access required")
+        XCTAssertFalse(try XCTUnwrap(grant.superview).isHidden)
+
+        controller.loadDirectory(URL(fileURLWithPath: "/Applications"))
+        XCTAssertTrue(try XCTUnwrap(grant.superview).isHidden)
+        XCTAssertFalse(status.stringValue.contains("access required"))
+    }
+
     @MainActor
     func testSessionRestoresTabGroupsOrderSelectionAndPaths() throws {
         let a = BrowserWindowController(initialURL: URL(fileURLWithPath: "/"))
