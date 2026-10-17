@@ -14,6 +14,7 @@ It aims to feel fast, direct, and keyboard-friendly rather than acting as a Find
 - Copy, move, duplicate, rename, batch rename, compress, and extract files
 - Use Quick Look, drag and drop, context menus, and standard keyboard shortcuts
 - Restore workspace state across launches
+- Explore disk capacity, file types, largest files, and folder usage in the [Storage dashboard](docs/storage-dashboard.md)
 
 ## Requirements
 

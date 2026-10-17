@@ -3,6 +3,7 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     private var windowControllers: [BrowserWindowController] = []
+    private(set) var storageWindowController: StorageWindowController?
     private var didPresentArchiveQuarantineWarning = false
     private var archiveQuarantineObserver: NSObjectProtocol?
     var archiveQuarantineAlertPresenterForTesting: ((NSAlert) -> Void)?
@@ -61,6 +62,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     // MARK: - Window Management
+
+    @MainActor @objc func showStorage(_ sender: Any?) {
+        if storageWindowController == nil {
+            let senderBrowser = (sender as? NSViewController)?.view.window?.windowController as? BrowserWindowController
+            let scope = (senderBrowser ?? currentBrowserController ?? windowControllers.last)?.currentLocation.localURL
+                ?? FileManager.default.homeDirectoryForCurrentUser
+            storageWindowController = StorageWindowController(scope: scope) { [weak self] url in
+                guard let self else { return }
+                let controller = self.windowControllers.last ?? BrowserWindowController(initialURL: url)
+                if !self.windowControllers.contains(where: { $0 === controller }) { self.windowControllers.append(controller) }
+                controller.navigate(to: url, addToHistory: true)
+                controller.showWindow(nil)
+                controller.window?.makeKeyAndOrderFront(nil)
+            }
+        }
+        storageWindowController?.model.refreshVolumes()
+        storageWindowController?.showWindow(nil)
+        storageWindowController?.window?.makeKeyAndOrderFront(nil)
+    }
 
     @objc func newWindow(_ sender: Any?) {
         // Opening a window into an empty app starts a fresh session; forget prior closes.
@@ -343,11 +363,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             menuItem.state = showsHiddenFiles ? .on : .off
             menuItem.title = showsHiddenFiles ? "Hide Hidden Files" : "Show Hidden Files"
             return currentSplitVC?.currentCapabilities.contains(.showHiddenFiles) ?? false
-        case #selector(viewAsColumns(_:)),
+        case #selector(viewAsList(_:)),
+             #selector(viewAsColumns(_:)),
              #selector(viewAsIcons(_:)),
              #selector(viewAsGallery(_:)),
              #selector(toggleDualPane(_:)):
             return currentSplitVC?.currentLocation.isLocal ?? false
+        case #selector(goBack(_:)), #selector(goForward(_:)), #selector(goToFolder(_:)),
+             #selector(toggleInspector(_:)), #selector(togglePreviewPane(_:)):
+            return currentBrowserController != nil
         default:
             return true
         }
@@ -456,6 +480,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let dualPaneItem = viewMenu.addItem(withTitle: "Dual Pane", action: #selector(toggleDualPane(_:)), keyEquivalent: "d")
         dualPaneItem.keyEquivalentModifierMask = [.command, .option]
 
+        viewMenu.addItem(.separator())
+        let storage = viewMenu.addItem(withTitle: "Show Storage", action: #selector(showStorage(_:)), keyEquivalent: "s")
+        storage.keyEquivalentModifierMask = [.command, .option]
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
 

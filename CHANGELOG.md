@@ -8,6 +8,14 @@ The format is intentionally simple and optimized for a small native app project.
 
 - No unreleased entries yet.
 
+## 1.1.0 - 2026-10-17
+
+### Added
+
+- Storage dashboard with volume capacity, allocated and logical file sizes, file types, and largest files.
+- Interactive storage charts, folder drill-down, breadcrumbs, filtering, and navigation back into Grove.
+- Cancellable background scanning with explicit partial results, hidden-file and package coverage, and hard-link deduplication.
+
 ## 1.0.4 - 2026-10-09
 
 ### Changed

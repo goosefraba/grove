@@ -200,6 +200,10 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         expandAllSections()
     }
 
+    @objc private func openStorageFromRail(_ sender: Any?) {
+        NSApp.sendAction(#selector(AppDelegate.showStorage(_:)), to: NSApp.delegate, from: self)
+    }
+
     private func setupRail() {
         railView.translatesAutoresizingMaskIntoConstraints = false
         GroveUI.prepareSurface(railView, color: GroveUI.railBackground)
@@ -249,6 +253,8 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         )
         cloudRailButton = cloud
         railStack.addArrangedSubview(cloud)
+
+        railBottomStack.addArrangedSubview(makeRailButton(symbol: "chart.pie", label: "Storage", action: #selector(openStorageFromRail(_:))))
 
         let trash = makeRailButton(
             symbol: "trash",
