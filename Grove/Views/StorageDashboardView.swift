@@ -34,9 +34,9 @@ struct StorageDashboardView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     header
                     volumes
-                    scopeHeader
+                    scopeHeader(compact: geometry.size.width < 650)
                     if let snapshot = model.snapshot {
-                        results(snapshot, wide: geometry.size.width > 880)
+                        results(snapshot, wide: geometry.size.width > 880, compact: geometry.size.width < 600)
                     } else { scanState }
                     footer
                 }
@@ -133,26 +133,39 @@ struct StorageDashboardView: View {
         }.modifier(StorageCard())
     }
 
-    private var scopeHeader: some View {
+    private var scopeIdentity: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "folder.fill").font(.system(size: 22)).foregroundStyle(StorageStyle.blue)
+                .frame(width: 44, height: 44).background(StorageStyle.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(model.scope.lastPathComponent.isEmpty ? "/" : model.scope.lastPathComponent)
+                    .font(.system(size: 20, weight: .semibold)).lineLimit(1).truncationMode(.middle)
+                Text(model.scope.path).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle).textSelection(.enabled).id(model.scope.path).help(model.scope.path)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var scopeActions: some View {
+        HStack {
+            Button("Choose Folder…") { model.chooseFolder?(model.scope) }.controlSize(.regular)
+                .accessibilityIdentifier("storageChooseFolder")
+            if model.isScanning {
+                Button("Stop") { model.stop() }.keyboardShortcut(".", modifiers: .command).accessibilityIdentifier("storageStop")
+            } else {
+                Button(model.snapshot == nil ? "Analyze" : "Rescan") { model.startScan() }
+                    .buttonStyle(.borderedProminent).keyboardShortcut("r", modifiers: .command).accessibilityIdentifier("storageAnalyze")
+            }
+        }
+    }
+
+    private func scopeHeader(compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
-                Image(systemName: "folder.fill").font(.system(size: 22)).foregroundStyle(StorageStyle.blue)
-                    .frame(width: 44, height: 44).background(StorageStyle.blue.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(model.scope.lastPathComponent.isEmpty ? "/" : model.scope.lastPathComponent)
-                        .font(.system(size: 20, weight: .semibold)).lineLimit(1).truncationMode(.middle)
-                    Text(model.scope.path).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
-                        .lineLimit(1).truncationMode(.middle).textSelection(.enabled).id(model.scope.path).help(model.scope.path)
-                }
-                Spacer(minLength: 4)
-                Button("Choose Folder…") { model.chooseFolder?(model.scope) }.controlSize(.regular)
-                    .accessibilityIdentifier("storageChooseFolder")
-                if model.isScanning {
-                    Button("Stop") { model.stop() }.keyboardShortcut(".", modifiers: .command).accessibilityIdentifier("storageStop")
-                } else {
-                    Button(model.snapshot == nil ? "Analyze" : "Rescan") { model.startScan() }
-                        .buttonStyle(.borderedProminent).keyboardShortcut("r", modifiers: .command).accessibilityIdentifier("storageAnalyze")
-                }
+            if compact {
+                scopeIdentity
+                scopeActions.frame(maxWidth: .infinity, alignment: .trailing)
+            } else {
+                HStack(spacing: 10) { scopeIdentity; scopeActions }
             }
             if model.trail.count > 1 {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -208,16 +221,19 @@ struct StorageDashboardView: View {
         }
     }
 
-    private func results(_ snapshot: DiskUsageSnapshot, wide: Bool) -> some View {
+    private func results(_ snapshot: DiskUsageSnapshot, wide: Bool, compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            HStack(spacing: 8) {
-                Circle().fill(snapshot.isPartial ? Color.orange : Color.green.opacity(0.8)).frame(width: 5, height: 5)
-                Text(snapshot.isPartial ? "Partial result" : "Scan complete").fontWeight(.medium)
-                Text("·")
-                Text(snapshot.finishedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
-                Text("· \(String(format: "%.1f", snapshot.finishedAt.timeIntervalSince(snapshot.startedAt)))s")
-                Spacer()
+            let statusLayout = compact ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10)) : AnyLayout(HStackLayout(spacing: 8))
+            statusLayout {
+                HStack(spacing: 8) {
+                    Circle().fill(snapshot.isPartial ? Color.orange : Color.green.opacity(0.8)).frame(width: 5, height: 5)
+                    Text(snapshot.isPartial ? "Partial result" : "Scan complete").fontWeight(.medium)
+                    Text("·")
+                    Text(snapshot.finishedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+                    Text("· \(String(format: "%.1f", snapshot.finishedAt.timeIntervalSince(snapshot.startedAt)))s")
+                }.frame(maxWidth: .infinity, alignment: .leading)
                 Button("Open in Grove") { model.openInGrove?(snapshot.root) }.buttonStyle(.link)
+                    .fixedSize().frame(maxWidth: compact ? .infinity : nil, alignment: .trailing)
             }.font(.system(size: 11)).foregroundStyle(.secondary)
             if snapshot.isPartial { coverageBanner(snapshot) }
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: wide ? 4 : 2), spacing: 14) {
@@ -231,15 +247,15 @@ struct StorageDashboardView: View {
             } else {
                 if wide {
                     HStack(alignment: .top, spacing: 18) {
-                        breakdown(snapshot).frame(maxWidth: .infinity)
+                        breakdown(snapshot, compact: false).frame(maxWidth: .infinity)
                         fileTypes(snapshot).frame(width: 260)
                     }
                 } else {
-                    breakdown(snapshot)
+                    breakdown(snapshot, compact: compact)
                     fileTypes(snapshot)
                 }
-                folderList(snapshot)
-                largestFiles(snapshot)
+                folderList(snapshot, compact: compact)
+                largestFiles(snapshot, compact: compact)
             }
             DisclosureGroup("About this measurement", isExpanded: $showDetails) {
                 VStack(alignment: .leading, spacing: 9) {
@@ -291,12 +307,13 @@ struct StorageDashboardView: View {
         }.padding(14).background(Color.orange.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
     }
 
-    private func breakdown(_ snapshot: DiskUsageSnapshot) -> some View {
+    private func breakdown(_ snapshot: DiskUsageSnapshot, compact: Bool) -> some View {
         let entries = Array(snapshot.entries.prefix(6).filter { $0.allocatedBytes > 0 })
         let remainder = max(0, snapshot.allocatedBytes - entries.reduce(0) { DiskUsageScanner.adding($0, $1.allocatedBytes) })
         return VStack(alignment: .leading, spacing: 18) {
             sectionLabel("SPACE BY ITEM", detail: "Click a folder to explore")
-            HStack(spacing: 24) {
+            let layout = compact ? AnyLayout(VStackLayout(alignment: .leading, spacing: 20)) : AnyLayout(HStackLayout(spacing: 24))
+            layout {
                 Chart {
                     ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                         SectorMark(angle: .value("Allocated size", entry.allocatedBytes), innerRadius: .ratio(0.76), angularInset: 2)
@@ -358,10 +375,11 @@ struct StorageDashboardView: View {
         }.modifier(StorageCard())
     }
 
-    private func folderList(_ snapshot: DiskUsageSnapshot) -> some View {
+    private func folderList(_ snapshot: DiskUsageSnapshot, compact: Bool) -> some View {
         let entries = snapshot.entries.filter { (!foldersOnly || $0.isDirectory) && (filter.isEmpty || $0.name.localizedCaseInsensitiveContains(filter)) }
         return VStack(alignment: .leading, spacing: 12) {
-            HStack {
+            let layout = compact ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12)) : AnyLayout(HStackLayout())
+            layout {
                 sectionLabel("FOLDER CONTENTS", detail: nil)
                 Spacer()
                 Toggle("Folders", isOn: $foldersOnly).toggleStyle(.checkbox).font(.system(size: 11))
@@ -372,27 +390,27 @@ struct StorageDashboardView: View {
                 Text("NAME")
                 Spacer()
                 Text("ALLOCATED SIZE").frame(width: 100, alignment: .trailing)
-                Text("SHARE").frame(width: 48, alignment: .trailing)
+                if !compact { Text("SHARE").frame(width: 48, alignment: .trailing) }
             }.font(.system(size: 9, weight: .medium, design: .monospaced)).foregroundStyle(.secondary).padding(.horizontal, 10)
             Divider().overlay(StorageStyle.line)
             if entries.isEmpty { Text("No matching items").font(.system(size: 12)).foregroundStyle(.secondary).padding(12) }
             LazyVStack(spacing: 2) {
-                ForEach(entries) { entry in itemRow(entry, total: snapshot.allocatedBytes, showPath: false) }
+                ForEach(entries) { entry in itemRow(entry, total: snapshot.allocatedBytes, showPath: false, compact: compact) }
             }
         }.modifier(StorageCard())
     }
 
-    private func largestFiles(_ snapshot: DiskUsageSnapshot) -> some View {
+    private func largestFiles(_ snapshot: DiskUsageSnapshot, compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             sectionLabel("LARGEST FILES", detail: "Top \(min(12, snapshot.largestFiles.count)) in this folder tree")
             if snapshot.largestFiles.isEmpty {
                 Text("No files with allocated data found.").font(.system(size: 12)).foregroundStyle(.secondary)
             }
-            ForEach(snapshot.largestFiles.prefix(12)) { entry in itemRow(entry, total: snapshot.allocatedBytes, showPath: true) }
+            ForEach(snapshot.largestFiles.prefix(12)) { entry in itemRow(entry, total: snapshot.allocatedBytes, showPath: true, compact: compact) }
         }.modifier(StorageCard())
     }
 
-    private func itemRow(_ entry: DiskUsageEntry, total: Int64, showPath: Bool) -> some View {
+    private func itemRow(_ entry: DiskUsageEntry, total: Int64, showPath: Bool, compact: Bool) -> some View {
         Button { activate(entry) } label: {
             HStack(spacing: 10) {
                 Image(systemName: entry.isSymbolicLink ? "link" : (entry.isDirectory ? "folder.fill" : "doc"))
@@ -414,7 +432,7 @@ struct StorageDashboardView: View {
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 Text(entry.issueCount > 0 && entry.allocatedBytes == 0 ? "Unavailable" : StorageStyle.bytes(entry.allocatedBytes))
                     .font(.system(size: 11, weight: .medium, design: .monospaced)).frame(width: 100, alignment: .trailing)
-                Text(percent(entry.allocatedBytes, of: total)).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).frame(width: 48, alignment: .trailing)
+                if !compact { Text(percent(entry.allocatedBytes, of: total)).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).frame(width: 48, alignment: .trailing) }
                 Image(systemName: entry.isDirectory && !entry.isExcluded ? "chevron.right" : "arrow.up.right")
                     .font(.system(size: 9)).foregroundStyle(.tertiary).frame(width: 10)
             }.padding(.horizontal, 10).padding(.vertical, 10).contentShape(Rectangle())

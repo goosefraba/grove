@@ -181,6 +181,7 @@ struct S3Location: Hashable, Codable {
 enum StorageLocation: Hashable, Codable {
     case local(URL)
     case s3(S3Location)
+    case dashboard(URL)
 
     private enum CodingKeys: String, CodingKey {
         case provider
@@ -193,12 +194,21 @@ enum StorageLocation: Hashable, Codable {
 
     var displayName: String {
         switch self {
+        case .dashboard:
+            return "Storage"
         case .local(let url):
             return url.displayName
         case .s3(let location):
             return location.displayName
         }
     }
+
+    var dashboardScope: URL? {
+        guard case .dashboard(let scope) = self else { return nil }
+        return scope
+    }
+
+    var isDashboard: Bool { dashboardScope != nil }
 
     var isLocal: Bool {
         if case .local = self { return true }
@@ -218,6 +228,8 @@ enum StorageLocation: Hashable, Codable {
             return parent == current ? nil : .local(parent)
         case .s3(let location):
             return location.parent.map(StorageLocation.s3)
+        case .dashboard:
+            return nil
         }
     }
 
@@ -227,6 +239,8 @@ enum StorageLocation: Hashable, Codable {
             return .localReadWrite
         case .s3:
             return .s3Browser
+        case .dashboard:
+            return []
         }
     }
 
@@ -238,6 +252,8 @@ enum StorageLocation: Hashable, Codable {
             }
         case .s3(let location):
             return location.breadcrumbs
+        case .dashboard:
+            return [StorageBreadcrumb(title: "Storage", location: self, toolTip: "Storage dashboard")]
         }
     }
 
@@ -248,6 +264,8 @@ enum StorageLocation: Hashable, Codable {
         case "local":
             let path = try container.decode(String.self, forKey: .path)
             self = .local(URL(fileURLWithPath: path).standardizedFileURL)
+        case "dashboard":
+            self = .dashboard(URL(fileURLWithPath: try container.decode(String.self, forKey: .path)))
         case "s3":
             self = .s3(S3Location(
                 profileName: try container.decodeIfPresent(String.self, forKey: .profileName),
@@ -263,6 +281,9 @@ enum StorageLocation: Hashable, Codable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
+        case .dashboard(let scope):
+            try container.encode("dashboard", forKey: .provider)
+            try container.encode(scope.path, forKey: .path)
         case .local(let url):
             try container.encode("local", forKey: .provider)
             try container.encode(url.path, forKey: .path)
@@ -277,6 +298,8 @@ enum StorageLocation: Hashable, Codable {
 
     var propertyListRepresentation: [String: Any] {
         switch self {
+        case .dashboard(let scope):
+            return ["provider": "dashboard", "path": scope.path]
         case .local(let url):
             return ["provider": "local", "path": url.path]
         case .s3(let location):
@@ -305,6 +328,9 @@ enum StorageLocation: Hashable, Codable {
         case "local":
             guard let path = dict["path"] as? String else { return nil }
             return .local(URL(fileURLWithPath: path).standardizedFileURL)
+        case "dashboard":
+            guard let path = dict["path"] as? String else { return nil }
+            return .dashboard(URL(fileURLWithPath: path))
         case "s3":
             return .s3(S3Location(
                 profileName: dict["profileName"] as? String,

@@ -25,9 +25,9 @@ final class BrowserWindow: NSWindow, NSDraggingDestination {
     }
 }
 
-final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSearchFieldDelegate, NSMenuItemValidation {
+final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSearchFieldDelegate, NSMenuItemValidation, NSWindowDelegate {
 
-    private let splitVC = MainSplitViewController()
+    private let splitVC: MainSplitViewController
     private var history: NavigationHistory
     private let pathBar = PathBarView()
     private let searchField = NSSearchField()
@@ -36,10 +36,20 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
     private var backButton: NSToolbarItem?
     private var forwardButton: NSToolbarItem?
     private var hiddenFilesItem: NSToolbarItem?
+    private var inspectorToolbarItem: NSToolbarItem?
     private var newFolderItem: NSToolbarItem?
 
     var currentLocation: StorageLocation { history.currentLocation }
-    var currentURL: URL { history.currentURL }
+    var currentURL: URL { storageDashboardModel?.scope ?? history.currentURL }
+    var storageDashboardModel: StorageDashboardModel? {
+        guard currentLocation.isDashboard else { return nil }
+        return splitVC.storageDashboardVC?.model
+    }
+    var hasStorageDashboard: Bool { splitVC.storageDashboardVC != nil }
+    var canGoBack: Bool { (storageDashboardModel?.trail.count ?? 0) > 1 || history.canGoBack }
+    var canGoForward: Bool { history.canGoForward }
+
+    func windowWillClose(_ notification: Notification) { splitVC.storageDashboardVC?.model.stop() }
 
     // Toolbar identifiers
     private let toolbarID = NSToolbar.Identifier("GroveToolbar")
@@ -61,6 +71,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
 
     init(initialLocation: StorageLocation) {
         self.history = NavigationHistory(initialLocation: initialLocation)
+        self.splitVC = MainSplitViewController(initialLocation: initialLocation)
 
         let window = BrowserWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
@@ -86,6 +97,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
         window.center()
 
         super.init(window: window)
+        window.delegate = self
         window.fileDropDelegate = self
         window.registerForDraggedTypes([.fileURL])
 
@@ -149,6 +161,11 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
     }
 
     @objc func goBack(_ sender: Any?) {
+        if let model = storageDashboardModel, model.trail.count > 1 {
+            model.goBack(to: model.trail.count - 2)
+            updateNavigationButtons()
+            return
+        }
         guard let location = history.goBackLocation() else { return }
         navigate(to: location, addToHistory: false)
     }
@@ -159,7 +176,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
     }
 
     private func updateNavigationButtons() {
-        backButton?.isEnabled = history.canGoBack
+        backButton?.isEnabled = canGoBack
         forwardButton?.isEnabled = history.canGoForward
     }
 
@@ -193,7 +210,8 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
     func saveState() -> [String: Any] {
         var state: [String: Any] = [:]
         state["currentURL"] = currentURL.path
-        state["currentLocation"] = currentLocation.propertyListRepresentation
+        let savedLocation = storageDashboardModel.map { StorageLocation.dashboard($0.scope) } ?? currentLocation
+        state["currentLocation"] = savedLocation.propertyListRepresentation
         state["viewMode"] = splitVC.currentViewMode.rawValue
         state["previewPaneVisible"] = splitVC.isPreviewPaneVisible
         state["dualPaneVisible"] = splitVC.isDualPaneVisible
@@ -345,6 +363,8 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
             item.target = self
             item.action = #selector(toggleInspector(_:))
             item.toolTip = "Toggle inspector panel"
+            inspectorToolbarItem = item
+            item.isEnabled = !currentLocation.isDashboard
             return item
 
         case newFolderID:
@@ -408,9 +428,9 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
         case #selector(goToFolder(_:)):
             return splitVC.currentLocation.isLocal
         case #selector(goBack(_:)):
-            return history.canGoBack
+            return canGoBack
         case #selector(goForward(_:)):
-            return history.canGoForward
+            return canGoForward
         default:
             return true
         }
@@ -436,6 +456,7 @@ final class BrowserWindowController: NSWindowController, NSToolbarDelegate, NSSe
     private func updateToolbarActionAvailability() {
         newFolderItem?.isEnabled = splitVC.currentCapabilities.contains(.createFolder)
         hiddenFilesItem?.isEnabled = splitVC.currentCapabilities.contains(.showHiddenFiles)
+        inspectorToolbarItem?.isEnabled = !currentLocation.isDashboard
     }
 
     @objc override func newWindowForTab(_ sender: Any?) {
@@ -485,6 +506,7 @@ extension BrowserWindowController: MainSplitViewControllerDelegate {
     }
 
     func splitViewSearchSupportDidChange() {
+        updateNavigationButtons()
         updateSearchFieldAvailability()
         updateToolbarActionAvailability()
     }

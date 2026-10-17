@@ -54,6 +54,7 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     private let railBottomStack = NSStackView()
     private var filesRailButton: SidebarRailButton?
     private var cloudRailButton: SidebarRailButton?
+    private var storageRailButton: SidebarRailButton?
     private var trashRailButton: SidebarRailButton?
 
     private let sections = SidebarSection.allCases
@@ -254,7 +255,9 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
         cloudRailButton = cloud
         railStack.addArrangedSubview(cloud)
 
-        railBottomStack.addArrangedSubview(makeRailButton(symbol: "chart.pie", label: "Storage", action: #selector(openStorageFromRail(_:))))
+        let storage = makeRailButton(symbol: "chart.pie", label: "Storage", action: #selector(openStorageFromRail(_:)))
+        storageRailButton = storage
+        railBottomStack.addArrangedSubview(storage)
 
         let trash = makeRailButton(
             symbol: "trash",
@@ -835,12 +838,14 @@ final class SidebarViewController: NSViewController, NSOutlineViewDataSource, NS
     }
 
     private func updateRailSelection(for location: StorageLocation) {
-        let isS3 = !location.isLocal
+        let isS3: Bool
+        if case .s3 = location { isS3 = true } else { isS3 = false }
+        storageRailButton?.isRailSelected = location.isDashboard
         let isTrash = location.localURL?.standardizedFileURL ==
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash").standardizedFileURL
         cloudRailButton?.isRailSelected = isS3
         trashRailButton?.isRailSelected = isTrash
-        filesRailButton?.isRailSelected = !isS3 && !isTrash
+        filesRailButton?.isRailSelected = !isS3 && !isTrash && !location.isDashboard
     }
 
     // MARK: - Context Menu Action

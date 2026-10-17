@@ -8,6 +8,14 @@ The format is intentionally simple and optimized for a small native app project.
 
 - No unreleased entries yet.
 
+## 1.1.1 - 2026-10-17
+
+### Changed
+
+- Open Storage in a reusable native tab inside the browser window.
+- Keep folder browsing and dashboard results together, with Back navigation and restored Storage tabs.
+- Adapt dashboard cards, charts, and lists to narrow browser panes.
+
 ## 1.1.0 - 2026-10-17
 
 ### Added

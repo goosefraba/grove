@@ -3,7 +3,6 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     private var windowControllers: [BrowserWindowController] = []
-    private(set) var storageWindowController: StorageWindowController?
     private var didPresentArchiveQuarantineWarning = false
     private var archiveQuarantineObserver: NSObjectProtocol?
     var archiveQuarantineAlertPresenterForTesting: ((NSAlert) -> Void)?
@@ -64,22 +63,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     // MARK: - Window Management
 
     @MainActor @objc func showStorage(_ sender: Any?) {
-        if storageWindowController == nil {
-            let senderBrowser = (sender as? NSViewController)?.view.window?.windowController as? BrowserWindowController
-            let scope = (senderBrowser ?? currentBrowserController ?? windowControllers.last)?.currentLocation.localURL
-                ?? FileManager.default.homeDirectoryForCurrentUser
-            storageWindowController = StorageWindowController(scope: scope) { [weak self] url in
-                guard let self else { return }
-                let controller = self.windowControllers.last ?? BrowserWindowController(initialURL: url)
-                if !self.windowControllers.contains(where: { $0 === controller }) { self.windowControllers.append(controller) }
-                controller.navigate(to: url, addToHistory: true)
-                controller.showWindow(nil)
-                controller.window?.makeKeyAndOrderFront(nil)
+        let source = (sender as? NSViewController)?.view.window?.windowController as? BrowserWindowController
+            ?? activeBrowserWindowController()
+        openStorageTab(relativeTo: source)
+    }
+
+    @MainActor @discardableResult
+    func openStorageTab(relativeTo source: BrowserWindowController?) -> BrowserWindowController {
+        let group = source?.window?.tabGroup?.windows ?? source?.window.map { [$0] } ?? []
+        if let existing = group.compactMap({ $0.windowController as? BrowserWindowController }).first(where: { $0.hasStorageDashboard }) {
+            if !existing.currentLocation.isDashboard {
+                let split = existing.contentViewController as? MainSplitViewController
+                let scope = split?.storageDashboardVC?.model.scope ?? existing.currentURL
+                existing.navigate(to: .dashboard(scope), addToHistory: true)
             }
+            existing.window?.tabGroup?.selectedWindow = existing.window
+            existing.window?.makeKeyAndOrderFront(nil)
+            return existing
         }
-        storageWindowController?.model.refreshVolumes()
-        storageWindowController?.showWindow(nil)
-        storageWindowController?.window?.makeKeyAndOrderFront(nil)
+        let scope = source?.currentLocation.localURL ?? source?.storageDashboardModel?.scope
+            ?? FileManager.default.homeDirectoryForCurrentUser
+        let controller = BrowserWindowController(initialLocation: .dashboard(scope))
+        if windowControllers.isEmpty { closedWindowStates.removeAll() }
+        windowControllers.append(controller)
+        if let sourceWindow = source?.window, let tab = controller.window {
+            sourceWindow.addTabbedWindow(tab, ordered: .above)
+            sourceWindow.tabGroup?.selectedWindow = tab
+        } else {
+            controller.showWindow(nil)
+        }
+        controller.window?.makeKeyAndOrderFront(nil)
+        return controller
     }
 
     @objc func newWindow(_ sender: Any?) {
@@ -99,7 +113,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             return
         }
 
-        let wc = BrowserWindowController(initialLocation: currentWC.currentLocation)
+        let location = currentWC.currentLocation.isDashboard ? StorageLocation.local(currentWC.currentURL) : currentWC.currentLocation
+        let wc = BrowserWindowController(initialLocation: location)
         windowControllers.append(wc)
         guard let newWindow = wc.window else { return }
         currentWindow.addTabbedWindow(newWindow, ordered: .above)
@@ -369,9 +384,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
              #selector(viewAsGallery(_:)),
              #selector(toggleDualPane(_:)):
             return currentSplitVC?.currentLocation.isLocal ?? false
-        case #selector(goBack(_:)), #selector(goForward(_:)), #selector(goToFolder(_:)),
-             #selector(toggleInspector(_:)), #selector(togglePreviewPane(_:)):
-            return currentBrowserController != nil
+        case #selector(goBack(_:)):
+            return currentBrowserController?.canGoBack ?? false
+        case #selector(goForward(_:)):
+            return currentBrowserController?.canGoForward ?? false
+        case #selector(goToFolder(_:)):
+            return currentSplitVC?.currentLocation.isLocal ?? false
+        case #selector(toggleInspector(_:)), #selector(togglePreviewPane(_:)):
+            return currentBrowserController != nil && currentSplitVC?.currentLocation.isDashboard == false
         default:
             return true
         }

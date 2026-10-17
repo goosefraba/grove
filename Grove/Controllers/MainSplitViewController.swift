@@ -28,6 +28,8 @@ final class MainSplitViewController: NSSplitViewController {
 
     private(set) var currentViewMode: ViewMode = .list
     private var currentContentVC: (NSViewController & FileViewControllerProtocol)?
+    private(set) var storageDashboardVC: StorageDashboardViewController?
+    private var storagePaneState: (inspectorCollapsed: Bool, previewCollapsed: Bool)?
     private var s3BrowserVC: S3BrowserViewController?
     private(set) var currentLocation: StorageLocation = .local(FileManager.default.homeDirectoryForCurrentUser)
     private var lastLocalViewMode: ViewMode = .list
@@ -36,6 +38,13 @@ final class MainSplitViewController: NSSplitViewController {
     private var dualPaneVC: DualPaneViewController?
     private var isDualPaneActive: Bool = false
     private var dualPaneSplitViewItem: NSSplitViewItem?
+
+    init(initialLocation: StorageLocation) {
+        currentLocation = initialLocation
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not implemented") }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -50,7 +59,14 @@ final class MainSplitViewController: NSSplitViewController {
         sidebarItem.maximumThickness = 340
         sidebarItem.canCollapse = true
 
-        contentItem = NSSplitViewItem(viewController: fileListVC)
+        if case .dashboard(let scope) = currentLocation {
+            let dashboard = StorageDashboardViewController(scope: scope)
+            storageDashboardVC = dashboard
+            contentItem = NSSplitViewItem(viewController: dashboard)
+        } else {
+            currentContentVC = fileListVC
+            contentItem = NSSplitViewItem(viewController: fileListVC)
+        }
         contentItem.minimumThickness = 300
 
         previewPaneItem = NSSplitViewItem(viewController: previewPaneVC)
@@ -68,8 +84,6 @@ final class MainSplitViewController: NSSplitViewController {
         addSplitViewItem(contentItem)
         addSplitViewItem(previewPaneItem)
         addSplitViewItem(inspectorItem)
-
-        currentContentVC = fileListVC
     }
 
     func navigate(to url: URL) {
@@ -79,13 +93,27 @@ final class MainSplitViewController: NSSplitViewController {
     func navigate(to location: StorageLocation) {
         let previousLocation = currentLocation
         currentLocation = location
+        if !location.isDashboard, let state = storagePaneState {
+            inspectorItem.isCollapsed = state.inspectorCollapsed
+            previewPaneItem.isCollapsed = state.previewCollapsed
+            storagePaneState = nil
+        }
         switch location {
+        case .dashboard(let scope):
+            if previousLocation.isLocal {
+                lastLocalViewMode = currentViewMode
+                lastLocalShowsHiddenFiles = showsHiddenFiles
+            }
+            showStorageDashboard(scope: scope)
+            sidebarVC.selectItem(for: location)
+            navigationDelegate?.splitViewSearchSupportDidChange()
+            return
         case .local:
             ensureLocalContentController()
         case .s3:
             if previousLocation.isLocal {
                 lastLocalViewMode = currentViewMode
-                lastLocalShowsHiddenFiles = currentContentVC?.showHiddenFiles ?? false
+                lastLocalShowsHiddenFiles = showsHiddenFiles
             }
             ensureS3ContentController()
         }
@@ -105,6 +133,7 @@ final class MainSplitViewController: NSSplitViewController {
     }
 
     func toggleInspector() {
+        guard !currentLocation.isDashboard else { return }
         inspectorItem.animator().isCollapsed.toggle()
     }
 
@@ -113,6 +142,7 @@ final class MainSplitViewController: NSSplitViewController {
     }
 
     func setInspectorCollapsed(_ collapsed: Bool) {
+        guard !currentLocation.isDashboard else { return }
         inspectorItem.isCollapsed = collapsed
     }
 
@@ -126,6 +156,7 @@ final class MainSplitViewController: NSSplitViewController {
     }
 
     func togglePreviewPane() {
+        guard !currentLocation.isDashboard else { return }
         previewPaneItem.animator().isCollapsed.toggle()
     }
 
@@ -134,6 +165,7 @@ final class MainSplitViewController: NSSplitViewController {
     }
 
     func setPreviewPaneVisible(_ visible: Bool) {
+        guard !currentLocation.isDashboard else { return }
         previewPaneItem.isCollapsed = !visible
     }
 
@@ -328,9 +360,36 @@ final class MainSplitViewController: NSSplitViewController {
         setShowsHiddenFiles(!showsHiddenFiles)
     }
 
+    private func showStorageDashboard(scope: URL) {
+        if isDualPaneActive { deactivateDualPane() }
+        if storagePaneState == nil {
+            storagePaneState = (inspectorItem.isCollapsed, previewPaneItem.isCollapsed)
+        }
+        inspectorItem.isCollapsed = true
+        previewPaneItem.isCollapsed = true
+        inspectorVC.updateSelection([BrowserItem]())
+        previewPaneVC.updateSelection(nil)
+        view.window?.makeFirstResponder(nil)
+        let dashboard = storageDashboardVC ?? StorageDashboardViewController(scope: scope)
+        dashboard.model.openInGrove = { [weak self] url in
+            self?.navigationDelegate?.splitViewDidNavigate(to: url)
+        }
+        dashboard.navigationDidChange = { [weak self] in
+            guard let self, self.currentLocation.isDashboard else { return }
+            self.navigationDelegate?.splitViewSearchSupportDidChange()
+        }
+        storageDashboardVC = dashboard
+        if contentItem.viewController === dashboard { return }
+        removeSplitViewItem(contentItem)
+        contentItem = NSSplitViewItem(viewController: dashboard)
+        contentItem.minimumThickness = 300
+        insertSplitViewItem(contentItem, at: 1)
+        currentContentVC = nil
+    }
+
     private func ensureLocalContentController() {
         if isDualPaneActive { return }
-        if currentContentVC is S3BrowserViewController {
+        if currentContentVC == nil || currentContentVC is S3BrowserViewController {
             removeSplitViewItem(contentItem)
             let vc = localController(for: lastLocalViewMode, showHidden: lastLocalShowsHiddenFiles)
             contentItem = NSSplitViewItem(viewController: vc)

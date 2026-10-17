@@ -17,7 +17,7 @@ final class NavigationHistory {
     }
 
     var currentURL: URL {
-        currentLocation.localURL ?? FileManager.default.homeDirectoryForCurrentUser
+        currentLocation.localURL ?? currentLocation.dashboardScope ?? FileManager.default.homeDirectoryForCurrentUser
     }
 
     func navigateTo(_ url: URL) {

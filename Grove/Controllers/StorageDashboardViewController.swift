@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Combine
 
 @MainActor
 final class StorageDashboardModel: ObservableObject {
@@ -130,29 +131,19 @@ final class StorageDashboardModel: ObservableObject {
 }
 
 @MainActor
-final class StorageWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation {
+final class StorageDashboardViewController: NSViewController {
     let model: StorageDashboardModel
+    var navigationDidChange: (() -> Void)?
     private var mountObservers: [NSObjectProtocol] = []
+    private var modelObservation: AnyCancellable?
 
-    init(scope: URL, openInGrove: @escaping (URL) -> Void) {
+    init(scope: URL) {
         model = StorageDashboardModel(scope: scope)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 820),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "Storage · Grove"
-        window.minSize = NSSize(width: 720, height: 520)
-        window.tabbingMode = .disallowed
-        window.appearance = NSAppearance(named: .darkAqua)
-        window.backgroundColor = GroveUI.contentBackground
-        super.init(window: window)
-        window.delegate = self
-        model.openInGrove = openInGrove
+        super.init(nibName: nil, bundle: nil)
         model.chooseFolder = { [weak self] url in self?.chooseFolder(startingAt: url) }
-        let hosting = NSHostingController(rootView: StorageDashboardView(model: model))
-        hosting.sizingOptions = []
-        window.contentViewController = hosting
-        window.setContentSize(NSSize(width: 1120, height: 820))
-        if !window.setFrameUsingName("GroveStorageWindow") { window.center() }
-        window.setFrameAutosaveName("GroveStorageWindow")
+        modelObservation = model.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in self?.navigationDidChange?() }
+        }
         for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification, NSWorkspace.didRenameVolumeNotification] {
             mountObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor [weak self] in
@@ -166,17 +157,15 @@ final class StorageWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     required init?(coder: NSCoder) { fatalError("init(coder:) not implemented") }
     deinit { mountObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) } }
-    func windowWillClose(_ notification: Notification) { model.stop() }
 
-    @objc func goBack(_ sender: Any?) { model.goBack(to: model.trail.count - 2) }
-
-    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
-        if menuItem.action == #selector(goBack(_:)) { return model.trail.count > 1 }
-        return true
+    override func loadView() {
+        let hosting = NSHostingView(rootView: StorageDashboardView(model: model))
+        hosting.sizingOptions = []
+        view = hosting
     }
 
     private func chooseFolder(startingAt url: URL) {
-        guard let window else { return }
+        guard let window = view.window else { return }
         let panel = NSOpenPanel()
         panel.title = "Choose a folder to analyze"
         panel.prompt = "Analyze Folder"

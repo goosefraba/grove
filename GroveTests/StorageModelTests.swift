@@ -6,7 +6,7 @@ final class StorageModelTests: XCTestCase {
         let local = StorageLocation.local(URL(fileURLWithPath: "/tmp/grove").standardizedFileURL)
         let s3 = StorageLocation.s3(S3Location(profileName: "ops", regionOverride: "eu-west-1", bucket: "logs", prefix: "app/2026/"))
 
-        for location in [local, s3] {
+        for location in [local, s3, .dashboard(URL(fileURLWithPath: "/tmp/storage-scope"))] {
             let data = try JSONEncoder().encode(location)
             let decoded = try JSONDecoder().decode(StorageLocation.self, from: data)
             XCTAssertEqual(decoded, location)
@@ -22,6 +22,24 @@ final class StorageModelTests: XCTestCase {
         defer { controller.window?.close() }
 
         XCTAssertEqual(controller.currentLocation, .local(directory.standardizedFileURL))
+    }
+
+    func testDashboardIsReadOnlyAndSupportsHistoryAndSessionEncoding() throws {
+        let scope = URL(fileURLWithPath: "/tmp/storage-scope")
+        let location = StorageLocation.dashboard(scope)
+        XCTAssertFalse(location.isLocal)
+        XCTAssertTrue(location.isDashboard)
+        XCTAssertNil(location.localURL)
+        XCTAssertNil(location.parent)
+        XCTAssertEqual(location.displayName, "Storage")
+        XCTAssertTrue(location.capabilities.isEmpty)
+        XCTAssertEqual(location.breadcrumbs.map(\.title), ["Storage"])
+        XCTAssertEqual(StorageLocation.fromPropertyList(location.propertyListRepresentation), location)
+        let history = NavigationHistory(initialLocation: location)
+        history.navigateTo(.local(scope))
+        XCTAssertEqual(history.goBackLocation(), location)
+        XCTAssertEqual(history.currentURL, scope)
+        XCTAssertEqual(history.goForwardLocation(), .local(scope))
     }
 
     func testS3ParentLocationsAndDisplayNames() {

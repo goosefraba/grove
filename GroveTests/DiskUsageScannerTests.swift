@@ -1,5 +1,6 @@
 import XCTest
 import Combine
+import AppKit
 @testable import Grove
 
 final class DiskUsageScannerTests: XCTestCase {
@@ -211,30 +212,160 @@ final class DiskUsageScannerTests: XCTestCase {
     }
 
     @MainActor
-    func testSidebarOpensStorageAtItsFolderAndReusesWindow() throws {
+    func testStorageOpensInReusableTabAndPreservesOriginalBrowser() throws {
+        let automatic = NSWindow.allowsAutomaticWindowTabbing
+        NSWindow.allowsAutomaticWindowTabbing = false
+        defer { NSWindow.allowsAutomaticWindowTabbing = automatic }
         let browser = BrowserWindowController(initialURL: root)
+        browser.showWindow(nil)
         let delegate = AppDelegate()
-        defer { delegate.storageWindowController?.close(); browser.close() }
-        let split = try XCTUnwrap(browser.contentViewController as? MainSplitViewController)
         let originalURL = browser.currentURL
-        delegate.showStorage(split.sidebarVC)
-        let storage = try XCTUnwrap(delegate.storageWindowController)
-        XCTAssertEqual(storage.model.scope, originalURL)
-        delegate.showStorage(split.sidebarVC)
-        XCTAssertTrue(storage === delegate.storageWindowController)
+        let originalSplit = try XCTUnwrap(browser.contentViewController as? MainSplitViewController)
+        originalSplit.switchViewMode(.icons)
+        originalSplit.setPreviewPaneVisible(true)
+        originalSplit.setInspectorCollapsed(false)
+        let storage = delegate.openStorageTab(relativeTo: browser)
+        defer { storage.close(); browser.close() }
+        XCTAssertEqual(storage.storageDashboardModel?.scope, originalURL)
+        XCTAssertEqual(storage.window?.tabGroup?.windows.count, 2)
+        XCTAssertTrue(storage.window?.tabGroup === browser.window?.tabGroup)
+        XCTAssertEqual(storage.window?.tab.title, "Storage")
+        XCTAssertTrue(storage === delegate.openStorageTab(relativeTo: browser))
+        XCTAssertEqual(storage.window?.tabGroup?.windows.count, 2)
         XCTAssertEqual(browser.currentURL, originalURL)
+        XCTAssertEqual(originalSplit.currentViewMode, .icons)
+        XCTAssertTrue(originalSplit.isPreviewPaneVisible)
+        XCTAssertFalse(originalSplit.inspectorIsCollapsed)
+        let split = try XCTUnwrap(storage.contentViewController as? MainSplitViewController)
+        XCTAssertFalse(split.fileListVC.isViewLoaded, "Opening Storage must not start an unrelated Home listing or stop another tab's Spotlight search")
+        XCTAssertNil(split.activeContentViewController)
+        XCTAssertTrue(split.currentCapabilities.isEmpty)
+        XCTAssertFalse(split.supportsToolbarSearch)
+        XCTAssertFalse(split.isPreviewPaneVisible)
+        XCTAssertTrue(split.inspectorIsCollapsed)
+        split.toggleInspector(); split.togglePreviewPane(); split.toggleDualPane()
+        XCTAssertTrue(split.inspectorIsCollapsed)
+        XCTAssertFalse(split.isPreviewPaneVisible)
+        XCTAssertFalse(split.isDualPaneVisible)
     }
 
     @MainActor
-    func testStorageWindowIsSeparateAndClosingCancelsScan() throws {
-        let controller = StorageWindowController(scope: root) { _ in }
+    func testDashboardTabClosingCancelsScan() throws {
+        let controller = BrowserWindowController(initialLocation: .dashboard(root))
+        let model = try XCTUnwrap(controller.storageDashboardModel)
+        XCTAssertEqual(controller.window?.tabbingIdentifier, "com.grove.browser")
+        XCTAssertEqual(model.phase, .ready)
+        model.startScan()
+        controller.close()
+        XCTAssertEqual(model.phase, .stopped)
+    }
+
+    @MainActor
+    func testOpenInGroveStaysInTabAndBackRestoresScanThenFolderTrail() async throws {
+        try file("child/a", bytes: 9000)
+        let controller = BrowserWindowController(initialLocation: .dashboard(root))
         defer { controller.close() }
-        XCTAssertEqual(controller.window?.tabbingMode, .disallowed)
-        XCTAssertEqual(controller.model.phase, .ready)
-        XCTAssertNotNil(controller.window?.contentViewController)
-        controller.model.startScan()
-        controller.windowWillClose(Notification(name: NSWindow.willCloseNotification))
-        XCTAssertEqual(controller.model.phase, .stopped)
-        XCTAssertFalse(controller.model.isScanning)
+        let model = try XCTUnwrap(controller.storageDashboardModel)
+        func finish(_ action: () -> Void) async {
+            let done = expectation(description: "Scan completes")
+            let observation = model.$phase.dropFirst().sink { if $0 == .finished { done.fulfill() } }
+            action()
+            await fulfillment(of: [done], timeout: 5)
+            observation.cancel()
+        }
+        await finish { model.startScan() }
+        let child = try XCTUnwrap(model.snapshot?.entries.first { $0.name == "child" })
+        await finish { model.enter(child) }
+        let scope = model.scope
+        model.openInGrove?(scope)
+        XCTAssertTrue(controller.currentLocation.isLocal)
+        XCTAssertTrue(controller.canGoBack)
+        controller.goBack(nil)
+        XCTAssertTrue(controller.currentLocation.isDashboard)
+        XCTAssertTrue(controller.storageDashboardModel === model)
+        XCTAssertEqual(model.scope, scope)
+        XCTAssertEqual(model.snapshot?.logicalBytes, 9000)
+        controller.goBack(nil)
+        XCTAssertEqual(model.scope, root)
+        XCTAssertFalse(controller.canGoBack)
+        controller.goForward(nil)
+        XCTAssertTrue(controller.currentLocation.isLocal)
+        XCTAssertEqual(try DiskUsageScanner.canonicalURL(controller.currentURL), scope)
+    }
+
+    @MainActor
+    func testStorageRoundTripPreservesActiveDualPaneHiddenFiles() throws {
+        let controller = BrowserWindowController(initialLocation: .dashboard(root))
+        defer { controller.close() }
+        let model = try XCTUnwrap(controller.storageDashboardModel)
+        model.openInGrove?(root)
+        let split = try XCTUnwrap(controller.contentViewController as? MainSplitViewController)
+        split.setDualPaneVisible(true)
+        split.setShowsHiddenFiles(true)
+        XCTAssertTrue(split.showsHiddenFiles)
+        controller.goBack(nil)
+        XCTAssertTrue(controller.currentLocation.isDashboard)
+        controller.goForward(nil)
+        XCTAssertTrue(controller.currentLocation.isLocal)
+        XCTAssertTrue(split.showsHiddenFiles)
+    }
+
+    @MainActor
+    func testDashboardLayoutAtCompactAndRegularWindowWidths() async throws {
+        try file("Projects/Grove/Sources/StorageDashboard.swift", bytes: 180_000)
+        try file("Projects/Grove/Build/app", bytes: 900_000)
+        try file("Photos/Autumn in Vienna.jpg", bytes: 600_000)
+        try file("Documents/House plans.pdf", bytes: 240_000)
+        try file("archive.zip", bytes: 110_000)
+        let controller = BrowserWindowController(initialLocation: .dashboard(root))
+        defer { controller.close() }
+        let model = try XCTUnwrap(controller.storageDashboardModel)
+        let done = expectation(description: "Layout fixture scan completes")
+        let observation = model.$phase.dropFirst().sink { if $0 == .finished { done.fulfill() } }
+        model.startScan()
+        await fulfillment(of: [done], timeout: 5)
+        observation.cancel()
+        let split = try XCTUnwrap(controller.contentViewController as? MainSplitViewController)
+        let dashboard = try XCTUnwrap(split.storageDashboardVC)
+        let window = try XCTUnwrap(controller.window)
+        let output = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent(".build/storage-tabs-verification", isDirectory: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        controller.showWindow(nil)
+        for (name, width) in [("compact", 600.0), ("regular", 1200.0)] {
+            window.setContentSize(NSSize(width: width, height: name == "compact" ? 2300 : 1400))
+            window.contentView?.layoutSubtreeIfNeeded()
+            try await Task.sleep(nanoseconds: 250_000_000)
+            dashboard.view.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            let bounds = dashboard.view.bounds
+            XCTAssertGreaterThan(bounds.width, 290)
+            let bitmap = try XCTUnwrap(dashboard.view.bitmapImageRepForCachingDisplay(in: bounds))
+            dashboard.view.cacheDisplay(in: bounds, to: bitmap)
+            let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+            try png.write(to: output.appendingPathComponent("dashboard-\(name).png"))
+            let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+            attachment.name = "Storage \(name) layout"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    @MainActor
+    func testDashboardSessionRestoresInsideOriginalTabGroupWithoutScanning() throws {
+        let browser = BrowserWindowController(initialURL: root)
+        browser.showWindow(nil)
+        let delegate = AppDelegate()
+        let storage = delegate.openStorageTab(relativeTo: browser)
+        let states = AppDelegate.sessionStates(for: [browser, storage])
+        storage.close(); browser.close()
+        let restored = AppDelegate.restoreSession(states)
+        defer { restored.forEach { $0.close() } }
+        XCTAssertEqual(restored.count, 2)
+        let dashboard = try XCTUnwrap(restored.first { $0.currentLocation.isDashboard })
+        XCTAssertEqual(dashboard.storageDashboardModel?.phase, .ready)
+        XCTAssertEqual(dashboard.storageDashboardModel?.scope.path, root.standardizedFileURL.path)
+        XCTAssertEqual(dashboard.window?.tabGroup?.windows.count, 2)
+        XCTAssertTrue(dashboard.window?.tabGroup?.selectedWindow === dashboard.window)
     }
 }
